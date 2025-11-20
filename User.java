@@ -6,11 +6,9 @@ public class User {
     private final String username;
     private final String email;
     private final Set<String> friendIds;
-    // Stores conversations: Key is the conversation ID (or other user's ID), Value is list of messages
     private final Map<String, List<Message>> directMessages;
     private boolean online;
 
-    // Constructor with all parameters
     public User(
         String userId,
         String username,
@@ -22,7 +20,6 @@ public class User {
         this.userId = userId;
         this.username = username;
         this.email = email;
-        // Defensive copying to prevent external modification of the internal set
         this.friendIds = friendIds != null
             ? new HashSet<>(friendIds)
             : new HashSet<>();
@@ -44,7 +41,6 @@ public class User {
         return email;
     }
 
-    // Returns a copy to protect internal state
     public Set<String> getFriendIds() {
         return new HashSet<>(friendIds);
     }
