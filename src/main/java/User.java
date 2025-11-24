@@ -7,6 +7,7 @@ public class User {
     private final String email;
     private final Set<String> friendIds;
     private final Map<String, List<Message>> directMessages;
+    private final Set<String> blockedUserIds;
     private boolean online;
 
     public User(
@@ -27,6 +28,7 @@ public class User {
             ? new HashMap<>(directMessages)
             : new HashMap<>();
         this.online = online;
+        this.blockedUserIds = new HashSet<>();
     }
 
     public String getUserId() {
@@ -74,6 +76,25 @@ public class User {
     public List<Message> getDirectMessages(String conversationId) {
         return directMessages.getOrDefault(conversationId, new ArrayList<>());
     }
+
+    public void blockUser(String targetUserId) {
+        if (targetUserId != null && !targetUserId.equals(userId)) {
+            blockedUserIds.add(targetUserId);
+        }
+    }
+
+    public void unblockUser(String targetUserId) {
+        blockedUserIds.remove(targetUserId);
+    }
+
+    public boolean hasBlocked(String targetUserId) {
+        return blockedUserIds.contains(targetUserId);
+    }
+
+    public Set<String> getBlockedUserIds() {
+        return new HashSet<>(blockedUserIds);
+    }
+
 
     @Override
     public String toString() {

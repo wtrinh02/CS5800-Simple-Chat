@@ -84,7 +84,10 @@ public class LocalServer {
     }
 
     public int getMemberCount() {
-        return members.size();
+            if (isSystemOwned()) {
+                return Math.max(0, members.size() - 1);
+            }
+            return members.size();
     }
 
     @Override

@@ -71,7 +71,10 @@ public class ChatServer {
                         user.getUsername() + " joined the server",
                         Message.MessageType.SERVER_JOIN
                 );
-                broadcastToServer("general", "SERVER_MSG:SYSTEM:" + joinMessage.getContent());
+                broadcastToServer("general",
+                        "SERVER_MSG:general:SYSTEM:SYSTEM:" + joinMessage.getContent()
+                );
+
             }
 
             notifyFriendsOnlineStatus(userId, true);
@@ -96,7 +99,10 @@ public class ChatServer {
                         user.getUsername() + " left the server",
                         Message.MessageType.SERVER_LEAVE
                 );
-                broadcastToServer("general", "SERVER_MSG:SYSTEM:" + leaveMessage.getContent());
+                broadcastToServer("general",
+                        "SERVER_MSG:general:SYSTEM:SYSTEM:" + leaveMessage.getContent()
+                );
+
             }
 
             notifyFriendsOnlineStatus(userId, false);
@@ -112,6 +118,11 @@ public class ChatServer {
             sendToClient(senderId, "ERROR: User not found");
             return;
         }
+        if (receiver.hasBlocked(senderId)) {
+            sendToClient(senderId, "ERROR: Cannot send friend request (you are blocked by this user)");
+            return;
+        }
+
 
         Message friendRequest = new Message(
                 UUID.randomUUID().toString(),
@@ -152,6 +163,11 @@ public class ChatServer {
             return;
         }
 
+        if (receiver.hasBlocked(senderId) || sender.hasBlocked(receiverId)) {
+            sendToClient(senderId, "ERROR: Cannot send direct message (user is blocked)");
+            return;
+        }
+
         if (!sender.isFriend(receiverId)) {
             sendToClient(senderId, "ERROR: Not friends with this user");
             return;
@@ -169,9 +185,15 @@ public class ChatServer {
         sender.addDirectMessage(conversationId, message);
         receiver.addDirectMessage(conversationId, message);
 
+
         sendToClient(receiverId, "DM:" + senderId + ":" + sender.getUsername() + ":" + content);
+
+
+        sendToClient(senderId, "DM_DELIVERED:" + receiverId + ":" + receiver.getUsername() + ":" + content);
+
         System.out.println("DM: " + senderId + " -> " + receiverId + ": " + content);
     }
+
 
     public synchronized List<String> getOnlineFriends(String userId) {
         User user = users.get(userId);
@@ -186,6 +208,48 @@ public class ChatServer {
         }
         return onlineFriends;
     }
+
+    public synchronized void blockUser(String userId, String blockedId) {
+        User user = users.get(userId);
+        User target = users.get(blockedId);
+
+        if (user == null || target == null) {
+            sendToClient(userId, "ERROR: User not found");
+            return;
+        }
+
+        user.blockUser(blockedId);
+        sendToClient(userId, "BLOCKED:" + blockedId + ":" + target.getUsername());
+    }
+
+    public synchronized void unblockUser(String userId, String blockedId) {
+        User user = users.get(userId);
+        User target = users.get(blockedId);
+
+        if (user == null || target == null) {
+            sendToClient(userId, "ERROR: User not found");
+            return;
+        }
+
+        user.unblockUser(blockedId);
+        sendToClient(userId, "UNBLOCKED:" + blockedId + ":" + target.getUsername());
+    }
+
+    public synchronized List<String> getBlockedUsers(String userId) {
+        User user = users.get(userId);
+        List<String> result = new ArrayList<>();
+        if (user == null) {
+            return result;
+        }
+        for (String blockedId : user.getBlockedUserIds()) {
+            User blockedUser = users.get(blockedId);
+            if (blockedUser != null) {
+                result.add(blockedId + ":" + blockedUser.getUsername());
+            }
+        }
+        return result;
+    }
+
 
     private void notifyFriendsOnlineStatus(String userId, boolean online) {
         User user = users.get(userId);
@@ -212,6 +276,15 @@ public class ChatServer {
 
     public User getUser(String userId) {
         return users.get(userId);
+    }
+
+    public synchronized List<Message> getConversationHistory(String userId, String friendId) {
+        User user = users.get(userId);
+        if (user == null) {
+            return new ArrayList<>();
+        }
+        String conversationId = getConversationId(userId, friendId);
+        return new ArrayList<>(user.getDirectMessages(conversationId));
     }
 
 
@@ -260,7 +333,10 @@ public class ChatServer {
                 user.getUsername() + " joined the server",
                 Message.MessageType.SERVER_JOIN
         );
-        broadcastToServer(serverId, "SERVER_MSG:SYSTEM:" + joinMessage.getContent());
+        broadcastToServer(serverId,
+                "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + joinMessage.getContent()
+        );
+
 
         System.out.println("User " + userId + " joined server: " + serverId);
     }
@@ -289,7 +365,10 @@ public class ChatServer {
                 user.getUsername() + " left the server",
                 Message.MessageType.SERVER_LEAVE
         );
-        broadcastToServer(serverId, "SERVER_MSG:SYSTEM:" + leaveMessage.getContent());
+        broadcastToServer(serverId,
+                "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + leaveMessage.getContent()
+        );
+
 
         System.out.println("User " + userId + " left server: " + serverId);
     }
@@ -321,7 +400,10 @@ public class ChatServer {
         );
 
         server.addMessage(message);
-        broadcastToServer(serverId, "SERVER_MSG:" + userId + ":" + user.getUsername() + ":" + content);
+        broadcastToServer(serverId,
+                "SERVER_MSG:" + serverId + ":" + userId + ":" + user.getUsername() + ":" + content
+        );
+
 
         System.out.println("Server message in " + serverId + " from " + userId + ": " + content);
     }
@@ -480,7 +562,42 @@ class ClientHandler implements Runnable {
                     List<String> members = server.getServerMembers(parts[1]);
                     sendMessage("MEMBERS:" + parts[1] + ":" + String.join(",", members));
                 }
+                break;        case "BLOCK_USER":
+                if (parts.length >= 2) {
+                    server.blockUser(userId, parts[1]);
+                }
                 break;
+
+            case "UNBLOCK_USER":
+                if (parts.length >= 2) {
+                    server.unblockUser(userId, parts[1]);
+                }
+                break;
+
+            case "GET_BLOCKED":
+                List<String> blocked = server.getBlockedUsers(userId);
+                sendMessage("BLOCKED_LIST:" + String.join(",", blocked));
+                break;
+
+            case "GET_HISTORY":
+                if (parts.length >= 2) {
+                    String friendId = parts[1];
+                    List<Message> history = server.getConversationHistory(userId, friendId);
+                    StringBuilder payload = new StringBuilder();
+                    for (Message m : history) {
+                        if (payload.length() > 0) {
+                            payload.append("|");
+                        }
+                        payload.append(m.getFormattedTimestamp())
+                                .append("~")
+                                .append(m.getSenderId())
+                                .append("~")
+                                .append(m.getContent());
+                    }
+                    sendMessage("HISTORY:" + friendId + ":" + payload);
+                }
+                break;
+
         }
     }
 

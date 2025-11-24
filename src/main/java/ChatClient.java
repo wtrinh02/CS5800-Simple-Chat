@@ -160,26 +160,43 @@ public class ChatClient {
 
             case "SERVER_LEFT":
                 if (parts.length >= 2) {
-                    System.out.println("\n[LEFT SERVER] You left the server (ID: " + parts[1] + ")");
-                    if (parts[1].equals(currentServer)) {
-                        currentServer = null;
+                    String leftServer = parts[1];
+                    System.out.println("\n[LEFT SERVER] You left server: " + leftServer);
+
+                    if (leftServer.equals(currentServer)) {
+                        currentServer = "general";
+                        System.out.println("[AUTO-JOIN] Switched back to general server.");
+                        joinLocalServer("general");
                     }
                 }
                 break;
 
+
             case "SERVER_MSG":
-                String[] smParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
-                if (smParts.length >= 3) {
-                    String senderId = smParts[0];
-                    String senderName = smParts[1];
-                    String content = smParts[2];
+                String[] smParts = parts.length >= 2 ? parts[1].split(":", 4) : new String[0];
+
+                if (smParts.length >= 4) {
+                    String serverId = smParts[0];
+                    String senderId = smParts[1];
+                    String senderName = smParts[2];
+                    String content = smParts[3];
+
                     if (senderId.equals("SYSTEM")) {
-                        System.out.println("\n[SERVER] " + content);
+                        if (serverId.equals(currentServer)) {
+                            System.out.println("\n[* " + serverId + " | SERVER] " + content);
+                        } else {
+                            System.out.println("\n[" + serverId + " | SERVER] " + content);
+                        }
                     } else {
-                        System.out.println("\n[" + senderName + "]: " + content);
+                        if (serverId.equals(currentServer)) {
+                            System.out.println("\n[* " + serverId + " | " + senderName + "] " + content);
+                        } else {
+                            System.out.println("\n[" + serverId + " | " + senderName + "] " + content);
+                        }
                     }
                 }
                 break;
+
 
             case "SERVERS":
                 System.out.println("\n=== Available Servers ===");
@@ -227,6 +244,67 @@ public class ChatClient {
                 }
                 break;
 
+            case "DM_DELIVERED":
+                String[] ddParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
+                if (ddParts.length >= 3) {
+                    String receiverName = ddParts[1];
+                    String content = ddParts[2];
+                    System.out.println("\n[DELIVERED] Message to " + receiverName + ": " + content);
+                }
+                break;
+
+            case "BLOCKED":
+                String[] bParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
+                if (bParts.length >= 2) {
+                    System.out.println("\n[BLOCKED] You blocked " + bParts[1] + " (ID: " + bParts[0] + ")");
+                }
+                break;
+
+            case "UNBLOCKED":
+                String[] ubParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
+                if (ubParts.length >= 2) {
+                    System.out.println("\n[UNBLOCKED] You unblocked " + ubParts[1] + " (ID: " + ubParts[0] + ")");
+                }
+                break;
+
+            case "BLOCKED_LIST":
+                System.out.println("\n=== Blocked Users ===");
+                if (parts.length >= 2 && !parts[1].isEmpty()) {
+                    String[] blockedUsers = parts[1].split(",");
+                    for (String blocked : blockedUsers) {
+                        String[] buParts = blocked.split(":");
+                        if (buParts.length >= 2) {
+                            System.out.println("  - " + buParts[1] + " (ID: " + buParts[0] + ")");
+                        }
+                    }
+                } else {
+                    System.out.println("You have not blocked any users.");
+                }
+                break;
+
+            case "HISTORY":
+                String[] hParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
+                if (hParts.length >= 1) {
+                    String friendId = hParts[0];
+                    System.out.println("\n=== DM History with " + friendId + " ===");
+                    if (hParts.length == 2 && !hParts[1].isEmpty()) {
+                        String[] entries = hParts[1].split("\\|");
+                        for (String entry : entries) {
+                            String[] eParts = entry.split("~", 3);
+                            if (eParts.length == 3) {
+                                String timestamp = eParts[0];
+                                String sender = eParts[1];
+                                String content = eParts[2];
+                                System.out.println("[" + timestamp + "] " + sender + ": " + content);
+                            }
+                        }
+                    } else {
+                        System.out.println("No previous messages.");
+                    }
+                }
+                break;
+
+
             default:
                 System.out.println("[SERVER] " + message);
         }
@@ -252,6 +330,24 @@ public class ChatClient {
         sendCommand("GET_FRIENDS");
     }
 
+    public void blockUser(String targetUserId) {
+        sendCommand("BLOCK_USER:" + targetUserId);
+        System.out.println("Blocking user: " + targetUserId);
+    }
+
+    public void unblockUser(String targetUserId) {
+        sendCommand("UNBLOCK_USER:" + targetUserId);
+        System.out.println("Unblocking user: " + targetUserId);
+    }
+
+    public void getBlockedUsers() {
+        sendCommand("GET_BLOCKED");
+    }
+
+    public void getDirectMessageHistory(String friendId) {
+        sendCommand("GET_HISTORY:" + friendId);
+    }
+
     public void createLocalServer(String serverId, String serverName) {
         sendCommand("CREATE_SERVER:" + serverId + ":" + serverName);
         System.out.println("Creating server: " + serverName);
@@ -268,6 +364,12 @@ public class ChatClient {
     }
 
     public void sendServerMessage(String serverId, String content) {
+        if (currentServer == null) {
+            System.out.println("You are not in any server. Switching you back to general...");
+            joinLocalServer("general");
+            currentServer = "general";
+        }
+
         sendCommand("SERVER_MSG:" + serverId + ":" + content);
     }
 
@@ -293,6 +395,10 @@ public class ChatClient {
         System.out.println("accept <userId>     - Accept friend request");
         System.out.println("dm <userId> <msg>   - Send direct message");
         System.out.println("friends             - List online friends");
+        System.out.println("block <userId>      - Block a user");
+        System.out.println("unblock <userId>    - Unblock a user");
+        System.out.println("blocked             - Show blocked users");
+        System.out.println("history <userId>    - Show DM history with user");
         System.out.println("\n=== Server Commands ===");
         System.out.println("create <serverId> <n> - Create a server");
         System.out.println("servers             - List all servers");
@@ -387,6 +493,34 @@ public class ChatClient {
                         System.out.println("You are not in any server. Join a server first.");
                     } else {
                         System.out.println("Usage: say <message>");
+                    }
+                    break;
+
+                case "block":
+                    if (parts.length >= 2) {
+                        blockUser(parts[1]);
+                    } else {
+                        System.out.println("Usage: block <userId>");
+                    }
+                    break;
+
+                case "unblock":
+                    if (parts.length >= 2) {
+                        unblockUser(parts[1]);
+                    } else {
+                        System.out.println("Usage: unblock <userId>");
+                    }
+                    break;
+
+                case "blocked":
+                    getBlockedUsers();
+                    break;
+
+                case "history":
+                    if (parts.length >= 2) {
+                        getDirectMessageHistory(parts[1]);
+                    } else {
+                        System.out.println("Usage: history <userId>");
                     }
                     break;
 
