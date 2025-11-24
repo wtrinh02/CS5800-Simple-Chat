@@ -1,0 +1,221 @@
+@startuml
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+package "Chat Application" {
+
+    class ChatServer <<Mediator>> {
+        - PORT : int
+        - users : Map<String, User>
+        - onlineClients : Map<String, ClientHandler>
+        - localServers : Map<String, LocalServer>
+        - threadPool : ExecutorService
+        - serverSocket : ServerSocket
+
+        + ChatServer()
+        + start() : void
+        + shutdown() : void
+
+        + registerUser(userId : String, username : String, email : String) : void
+        + connectUser(userId : String, handler : ClientHandler) : void
+        + disconnectUser(userId : String) : void
+
+        + sendFriendRequest(senderId : String, receiverId : String) : void
+        + acceptFriendRequest(userId : String, friendId : String) : void
+        + sendDirectMessage(senderId : String, receiverId : String, content : String) : void
+        + getOnlineFriends(userId : String) : List<String>
+
+        + createLocalServer(serverId : String, serverName : String, ownerId : String) : void
+        + joinLocalServer(userId : String, serverId : String) : void
+        + leaveLocalServer(userId : String, serverId : String) : void
+        + sendServerMessage(userId : String, serverId : String, content : String) : void
+        + listLocalServers() : List<String>
+        + getServerMembers(serverId : String) : List<String>
+
+        + getUser(userId : String) : User
+
+        - notifyFriendsOnlineStatus(userId : String, online : boolean) : void
+        - sendToClient(userId : String, message : String) : void
+        - getConversationId(userA : String, userB : String) : String
+        - broadcastToServer(serverId : String, message : String) : void
+    }
+
+    class ClientHandler <<Colleague>> {
+        - socket : Socket
+        - server : ChatServer
+        - input : BufferedReader
+        - output : PrintWriter
+        - userId : String
+
+        + ClientHandler(socket : Socket, server : ChatServer)
+        + run() : void
+        + sendMessage(message : String) : void
+
+        - processCommand(command : String) : void
+        - cleanup() : void
+    }
+
+    class ChatClient <<Colleague>> {
+        - SERVER_PORT : int
+        - serverHost : String
+        - socket : Socket
+        - input : BufferedReader
+        - output : PrintWriter
+        - userId : String
+        - username : String
+        - running : boolean
+        - currentServer : String
+        - listenerThread : Thread
+
+        + ChatClient(userId : String, username : String)
+        + ChatClient(userId : String, username : String, serverHost : String)
+
+        + connect() : void
+        + disconnect() : void
+        + startCLI() : void
+
+        + sendFriendRequest(friendId : String) : void
+        + acceptFriendRequest(friendId : String) : void
+        + sendDirectMessage(receiverId : String, content : String) : void
+        + getOnlineFriends() : void
+        + createLocalServer(serverId : String, serverName : String) : void
+        + joinLocalServer(serverId : String) : void
+        + leaveLocalServer(serverId : String) : void
+        + sendServerMessage(serverId : String, content : String) : void
+        + listLocalServers() : void
+        + getServerMembers(serverId : String) : void
+
+        - listenForMessages() : void
+        - handleServerMessage(message : String) : void
+        - sendCommand(command : String) : void
+    }
+
+    class LocalServer {
+        - SYSTEM_OWNER : String
+        - serverId : String
+        - serverName : String
+        - ownerId : String
+        - members : Set<String>
+        - messages : List<Message>
+
+        + LocalServer(serverId : String, serverName : String, ownerId : String)
+
+        + getServerId() : String
+        + getServerName() : String
+        + getOwnerId() : String
+        + getMembers() : Set<String>
+        + getMessages() : List<Message>
+        + addMember(userId : String) : void
+        + removeMember(userId : String) : void
+        + isMember(userId : String) : boolean
+        + addMessage(message : Message) : void
+        + getMemberCount() : int
+        + toString() : String
+
+        - validateConstructorParameters(serverId : String, serverName : String, ownerId : String) : void
+        - addOwnerAsMember() : void
+        - canRemoveMember(userId : String) : boolean
+        - isSystemOwned() : boolean
+        - isOwner(userId : String) : boolean
+    }
+
+    class User {
+        - userId : String
+        - username : String
+        - email : String
+        - friendIds : Set<String>
+        - directMessages : Map<String, List<Message>>
+        - online : boolean
+
+        + User(userId : String, username : String, email : String,
+               friendIds : Set<String>,
+               directMessages : Map<String, List<Message>>,
+               online : boolean)
+
+        + getUserId() : String
+        + getUsername() : String
+        + getEmail() : String
+        + getFriendIds() : Set<String>
+        + isOnline() : boolean
+        + setOnline(online : boolean) : void
+        + addFriend(friendId : String) : void
+        + removeFriend(friendId : String) : void
+        + isFriend(userId : String) : boolean
+        + addDirectMessage(conversationId : String, message : Message) : void
+        + getDirectMessages(conversationId : String) : List<Message>
+        + toString() : String
+    }
+
+    class UserBuilder {
+        - EMPTY_STRING : String
+        - DEFAULT_ONLINE_STATUS : boolean
+        - userId : String
+        - username : String
+        - email : String
+        - friendIds : Set<String>
+        - directMessages : Map<String, List<Message>>
+        - online : boolean
+
+        + UserBuilder()
+
+        + setUserId(userId : String) : UserBuilder
+        + setUsername(username : String) : UserBuilder
+        + setEmail(email : String) : UserBuilder
+        + setFriendIds(friendIds : Set<String>) : UserBuilder
+        + setDirectMessages(directMessages : Map<String, List<Message>>) : UserBuilder
+        + setOnline(online : boolean) : UserBuilder
+        + build() : User
+    }
+
+    class Message {
+        - messageId : String
+        - senderId : String
+        - receiverId : String
+        - content : String
+        - timestamp : LocalDateTime
+        - type : MessageType
+
+        + Message(messageId : String, senderId : String, receiverId : String,
+                   content : String, type : MessageType)
+
+        + getMessageId() : String
+        + getSenderId() : String
+        + getReceiverId() : String
+        + getContent() : String
+        + getTimestamp() : LocalDateTime
+        + getType() : MessageType
+        + getFormattedTimestamp() : String
+        + toString() : String
+        + toDisplayString() : String
+    }
+
+    enum MessageType {
+        DIRECT_MESSAGE
+        FRIEND_REQUEST
+        FRIEND_ACCEPT
+        SYSTEM_MESSAGE
+        USER_ONLINE
+        USER_OFFLINE
+        SERVER_MESSAGE
+        SERVER_JOIN
+        SERVER_LEAVE
+    }
+
+    ChatServer "1" o-- "*" User
+    ChatServer "1" o-- "*" LocalServer
+    ChatServer "1" o-- "*" ClientHandler
+    ClientHandler --> ChatServer
+    ChatClient --> ChatServer : via socket
+    LocalServer "1" o-- "*" Message
+    User "1" o-- "*" Message
+    Message --> MessageType
+    UserBuilder ..> User : <<builds>>
+
+
+    note right of ChatServer
+        <<Mediator>>
+        All communication between clients
+        flows through this class.
+    end note
+}
+@enduml
