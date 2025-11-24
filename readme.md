@@ -1,4 +1,4 @@
-# Simple Chat
+# Simple Chat MVP
 
 A multi-user chat application written in **pure Java** using **sockets and multithreading**.  
 Supports public servers, private messaging, friend requests, and real-time status updates — all from the terminal.
@@ -254,5 +254,11 @@ By using the Mediator pattern, the system becomes more modular, scalable, and ea
 
 ---
 
+## Goals for the Final Product
+- Add 3 more design patterns TBD
+- Implement a DataBase to Save users, messages, and servers.
+- Create a better frontend UI to improve user quality
+- Implement different types of messages (img,file,video)
+- IF have time figure out how voice channels work
 
 
