@@ -1,13 +1,11 @@
-// ========================================
-// FILE 6: ChatClient.java
-// ========================================
 import java.io.*;
 import java.net.*;
 import java.util.*;
 
 public class ChatClient {
-    private static final String SERVER_HOST = "localhost";
     private static final int SERVER_PORT = 8888;
+
+    private final String serverHost;
 
     private Socket socket;
     private BufferedReader in;
@@ -15,29 +13,38 @@ public class ChatClient {
     private String userId;
     private String username;
     private boolean running;
-    private String currentServer; // Track which server user is currently in
+    private String currentServer;
+    private Thread listenerThread;
+
 
     public ChatClient(String userId, String username) {
+        this(userId, username, "localhost");
+    }
+
+    public ChatClient(String userId, String username, String serverHost) {
         this.userId = userId;
         this.username = username;
         this.running = true;
         this.currentServer = null;
+        this.serverHost = serverHost;
     }
 
     public void connect() {
         try {
-            socket = new Socket(SERVER_HOST, SERVER_PORT);
+            socket = new Socket(serverHost, SERVER_PORT);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
 
-            // Register with server
+
             sendCommand("REGISTER:" + userId + ":" + username + ":user@example.com");
 
-            // Start listening thread
-            Thread listenerThread = new Thread(this::listenForMessages);
+
+            listenerThread = new Thread(this::listenForMessages);
+            listenerThread.setDaemon(true);   // <- add this
             listenerThread.start();
 
-            System.out.println("Connected to chat server as " + username);
+
+            System.out.println("Connected to chat server " + serverHost + ":" + SERVER_PORT + " as " + username);
 
         } catch (IOException e) {
             System.err.println("Connection error: " + e.getMessage());
@@ -386,7 +393,10 @@ public class ChatClient {
                 case "quit":
                 case "exit":
                     disconnect();
+                    System.out.println("Exiting client...");
+                    System.exit(0);
                     return;
+
 
                 default:
                     System.out.println("Unknown command: " + command);
@@ -399,26 +409,30 @@ public class ChatClient {
     public void disconnect() {
         running = false;
         try {
-            if (in != null) in.close();
-            if (out != null) out.close();
-            if (socket != null) socket.close();
+            if (socket != null && !socket.isClosed()) {
+                socket.close();  // this will also close in/out underneath
+            }
             System.out.println("Disconnected from server.");
         } catch (IOException e) {
             System.err.println("Error disconnecting: " + e.getMessage());
         }
     }
 
+
+
     public static void main(String[] args) {
         if (args.length < 2) {
-            System.out.println("Usage: java ChatClient <userId> <username>");
-            System.out.println("Example: java ChatClient user1 Alice");
+            System.out.println("Usage: java ChatClient <userId> <username> [serverHost]");
+            System.out.println("Example (local): java ChatClient u1 Alice");
+            System.out.println("Example (remote): java ChatClient u1 Alice 192.168.1.105");
             return;
         }
 
         String userId = args[0];
         String username = args[1];
+        String host = args.length >= 3 ? args[2] : "localhost";
 
-        ChatClient client = new ChatClient(userId, username);
+        ChatClient client = new ChatClient(userId, username, host);
         client.connect();
         client.startCLI();
     }
