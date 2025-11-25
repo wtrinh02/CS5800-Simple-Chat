@@ -1,8 +1,7 @@
 # Simple Chat MVP
 
 A multi-user chat application written in **pure Java** using **sockets and multithreading**.  
-Supports public servers, private messaging, friend requests, and real-time status updates — all from the terminal.
-
+Supports public servers, private messaging, friend requests, real-time status updates, and now persistent users + DM history — all from the terminal.
 ---
 
 ## 🚀 Features
@@ -11,7 +10,14 @@ Supports public servers, private messaging, friend requests, and real-time statu
 - Public server (`general`) auto-join on login
 - Custom server creation & joining
 - Friend system (add / accept)
+- ✅ Persistent users + DM history (saved even after shutdown)
+- ✅ Auto-loading of friends, history, and blocked list on login
+- ✅ Color-coded terminal UI
+- ✅ Message tagging by server
+- ✅ Auto-return to `general` when leaving a server
+- Blocking users
 - DMs between friends only
+- Seeing all DM history
 - Online/offline presence detection
 - Server member listing
 - Server-side message broadcasting
@@ -100,11 +106,14 @@ java ChatClient u2 Bob
 
 ## 💬 Chat Commands
 
-### Friend Commands
+### User Commands
 ```
 add <userId>        -> Send friend request
 accept <userId>     -> Accept friend request
 friends             -> View online friends
+block <userId>      -> Block a user
+unblock <userId>    -> Unblock a user
+blocked             -> View blocked users
 ```
 
 ---
@@ -112,6 +121,7 @@ friends             -> View online friends
 ### Direct Messaging (Friends Only)
 ```
 dm <userId> <message>
+history <userId>    -> See dm chat log with userId
 ```
 
 Example:
@@ -256,7 +266,7 @@ By using the Mediator pattern, the system becomes more modular, scalable, and ea
 
 ## Goals for the Final Product
 - Add 3 more design patterns TBD
-- Implement a DataBase to Save users, messages, and servers.
+- Update Persistence to use a Database instead
 - Create a better frontend UI to improve user quality
 - Implement different types of messages (img,file,video)
 - IF have time figure out how voice channels work
