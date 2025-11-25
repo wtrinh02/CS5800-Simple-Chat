@@ -5,6 +5,13 @@ import java.util.concurrent.*;
 
 public class ChatServer {
     private static final int PORT = 8888;
+
+    private static final String DATA_DIR      = "data";
+    private static final String USERS_FILE    = DATA_DIR + File.separator + "users.csv";
+    private static final String DM_DIR        = DATA_DIR + File.separator + "dm";
+    private static final String FRIENDS_FILE  = DATA_DIR + File.separator + "friends.csv";
+    private static final String BLOCKED_FILE  = DATA_DIR + File.separator + "blocked.csv";
+
     private final Map<String, User> users;
     private final Map<String, ClientHandler> onlineClients;
     private final Map<String, LocalServer> localServers;
@@ -17,6 +24,10 @@ public class ChatServer {
         this.localServers = new ConcurrentHashMap<>();
         this.threadPool = Executors.newCachedThreadPool();
 
+
+        loadUsersFromFile();
+        loadFriendsFromFile();
+        loadBlockedFromFile();
 
         LocalServer generalServer = new LocalServer("general", "General", "SYSTEM");
         localServers.put("general", generalServer);
@@ -47,6 +58,7 @@ public class ChatServer {
                     .setOnline(true)
                     .build();
             users.put(userId, user);
+            appendUserToFile(user);
             System.out.println("User registered: " + username);
         }
     }
@@ -57,12 +69,10 @@ public class ChatServer {
             user.setOnline(true);
             onlineClients.put(userId, handler);
 
-
             LocalServer generalServer = localServers.get("general");
             if (generalServer != null) {
                 generalServer.addMember(userId);
                 handler.sendMessage("SERVER_JOINED:general:" + generalServer.getServerName());
-
 
                 Message joinMessage = new Message(
                         UUID.randomUUID().toString(),
@@ -74,7 +84,6 @@ public class ChatServer {
                 broadcastToServer("general",
                         "SERVER_MSG:general:SYSTEM:SYSTEM:" + joinMessage.getContent()
                 );
-
             }
 
             notifyFriendsOnlineStatus(userId, true);
@@ -87,7 +96,6 @@ public class ChatServer {
         if (user != null) {
             user.setOnline(false);
             onlineClients.remove(userId);
-
 
             LocalServer generalServer = localServers.get("general");
             if (generalServer != null && generalServer.isMember(userId)) {
@@ -102,7 +110,6 @@ public class ChatServer {
                 broadcastToServer("general",
                         "SERVER_MSG:general:SYSTEM:SYSTEM:" + leaveMessage.getContent()
                 );
-
             }
 
             notifyFriendsOnlineStatus(userId, false);
@@ -122,7 +129,6 @@ public class ChatServer {
             sendToClient(senderId, "ERROR: Cannot send friend request (you are blocked by this user)");
             return;
         }
-
 
         Message friendRequest = new Message(
                 UUID.randomUUID().toString(),
@@ -147,6 +153,10 @@ public class ChatServer {
 
         user.addFriend(friendId);
         friend.addFriend(userId);
+
+
+        appendFriendshipToFile(userId, friendId);
+        appendFriendshipToFile(friendId, userId);
 
         sendToClient(userId, "FRIEND_ADDED:" + friendId + ":" + friend.getUsername());
         sendToClient(friendId, "FRIEND_ADDED:" + userId + ":" + user.getUsername());
@@ -186,14 +196,13 @@ public class ChatServer {
         receiver.addDirectMessage(conversationId, message);
 
 
+        appendDmToFile(conversationId, message);
+
         sendToClient(receiverId, "DM:" + senderId + ":" + sender.getUsername() + ":" + content);
-
-
         sendToClient(senderId, "DM_DELIVERED:" + receiverId + ":" + receiver.getUsername() + ":" + content);
 
         System.out.println("DM: " + senderId + " -> " + receiverId + ": " + content);
     }
-
 
     public synchronized List<String> getOnlineFriends(String userId) {
         User user = users.get(userId);
@@ -219,6 +228,7 @@ public class ChatServer {
         }
 
         user.blockUser(blockedId);
+        appendBlockedToFile(userId, blockedId);
         sendToClient(userId, "BLOCKED:" + blockedId + ":" + target.getUsername());
     }
 
@@ -232,6 +242,8 @@ public class ChatServer {
         }
 
         user.unblockUser(blockedId);
+        rewriteBlockedFileFromMemory();
+
         sendToClient(userId, "UNBLOCKED:" + blockedId + ":" + target.getUsername());
     }
 
@@ -249,7 +261,6 @@ public class ChatServer {
         }
         return result;
     }
-
 
     private void notifyFriendsOnlineStatus(String userId, boolean online) {
         User user = users.get(userId);
@@ -279,21 +290,59 @@ public class ChatServer {
     }
 
     public synchronized List<Message> getConversationHistory(String userId, String friendId) {
-        User user = users.get(userId);
-        if (user == null) {
-            return new ArrayList<>();
-        }
+        List<Message> result = new ArrayList<>();
         String conversationId = getConversationId(userId, friendId);
-        return new ArrayList<>(user.getDirectMessages(conversationId));
-    }
 
+        User user = users.get(userId);
+        if (user != null) {
+            result.addAll(user.getDirectMessages(conversationId));
+        }
+
+        if (!result.isEmpty()) {
+            return result;
+        }
+
+        File dmDir = new File(DM_DIR);
+        if (!dmDir.exists()) {
+            return result;
+        }
+
+        File file = new File(dmDir, conversationId + ".log");
+        if (!file.exists()) {
+            return result;
+        }
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split("\\|", 5);
+                if (parts.length >= 4) {
+                    String sender   = parts[1];
+                    String receiver = parts[2];
+                    String content  = parts[3];
+
+                    Message msg = new Message(
+                            UUID.randomUUID().toString(),
+                            sender,
+                            receiver,
+                            content,
+                            Message.MessageType.DIRECT_MESSAGE
+                    );
+                    result.add(msg);
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to load DM history: " + e.getMessage());
+        }
+
+        return result;
+    }
 
     public synchronized void createLocalServer(String serverId, String serverName, String ownerId) {
         if (!localServers.containsKey(serverId)) {
             LocalServer server = new LocalServer(serverId, serverName, ownerId);
             localServers.put(serverId, server);
             sendToClient(ownerId, "SERVER_CREATED:" + serverId + ":" + serverName);
-
 
             for (String userId : onlineClients.keySet()) {
                 if (!userId.equals(ownerId)) {
@@ -322,9 +371,7 @@ public class ChatServer {
 
         server.addMember(userId);
 
-
         sendToClient(userId, "SERVER_JOINED:" + serverId + ":" + server.getServerName());
-
 
         Message joinMessage = new Message(
                 UUID.randomUUID().toString(),
@@ -336,7 +383,6 @@ public class ChatServer {
         broadcastToServer(serverId,
                 "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + joinMessage.getContent()
         );
-
 
         System.out.println("User " + userId + " joined server: " + serverId);
     }
@@ -357,7 +403,6 @@ public class ChatServer {
         server.removeMember(userId);
         sendToClient(userId, "SERVER_LEFT:" + serverId);
 
-
         Message leaveMessage = new Message(
                 UUID.randomUUID().toString(),
                 "SYSTEM",
@@ -368,7 +413,6 @@ public class ChatServer {
         broadcastToServer(serverId,
                 "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + leaveMessage.getContent()
         );
-
 
         System.out.println("User " + userId + " left server: " + serverId);
     }
@@ -403,7 +447,6 @@ public class ChatServer {
         broadcastToServer(serverId,
                 "SERVER_MSG:" + serverId + ":" + userId + ":" + user.getUsername() + ":" + content
         );
-
 
         System.out.println("Server message in " + serverId + " from " + userId + ": " + content);
     }
@@ -449,6 +492,197 @@ public class ChatServer {
             if (serverSocket != null) serverSocket.close();
         } catch (IOException e) {
             System.err.println("Error shutting down server: " + e.getMessage());
+        }
+    }
+
+
+    private void loadUsersFromFile() {
+        File file = new File(USERS_FILE);
+        if (!file.exists()) {
+            return;
+        }
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            int count = 0;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",", 3);
+                if (parts.length == 3) {
+                    String id    = parts[0];
+                    String name  = parts[1];
+                    String email = parts[2];
+
+                    User user = new UserBuilder()
+                            .setUserId(id)
+                            .setUsername(name)
+                            .setEmail(email)
+                            .setOnline(false)
+                            .build();
+                    users.put(id, user);
+                    count++;
+                }
+            }
+            System.out.println("Loaded " + count + " users from disk.");
+        } catch (IOException e) {
+            System.err.println("Failed to load users from file: " + e.getMessage());
+        }
+    }
+
+    private void appendUserToFile(User user) {
+        try {
+            File dataDir = new File(DATA_DIR);
+            if (!dataDir.exists()) {
+                dataDir.mkdirs();
+            }
+
+            try (FileWriter fw = new FileWriter(USERS_FILE, true);
+                 BufferedWriter bw = new BufferedWriter(fw);
+                 PrintWriter out = new PrintWriter(bw)) {
+
+                out.println(user.getUserId() + "," +
+                        user.getUsername() + "," +
+                        user.getEmail());
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to persist user: " + e.getMessage());
+        }
+    }
+
+    private void appendDmToFile(String conversationId, Message message) {
+        try {
+            File dmDir = new File(DM_DIR);
+            if (!dmDir.exists()) {
+                dmDir.mkdirs();
+            }
+
+            File file = new File(dmDir, conversationId + ".log");
+            try (FileWriter fw = new FileWriter(file, true);
+                 BufferedWriter bw = new BufferedWriter(fw);
+                 PrintWriter out = new PrintWriter(bw)) {
+
+                // Store: timestamp|senderId|receiverId|content|type
+                out.println(message.getFormattedTimestamp() + "|" +
+                        message.getSenderId() + "|" +
+                        message.getReceiverId() + "|" +
+                        message.getContent().replace("\n", " ") + "|" +
+                        message.getType().name());
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to persist DM: " + e.getMessage());
+        }
+    }
+
+    private void appendFriendshipToFile(String userId, String friendId) {
+        try {
+            File dataDir = new File(DATA_DIR);
+            if (!dataDir.exists()) {
+                dataDir.mkdirs();
+            }
+
+            try (FileWriter fw = new FileWriter(FRIENDS_FILE, true);
+                 BufferedWriter bw = new BufferedWriter(fw);
+                 PrintWriter out = new PrintWriter(bw)) {
+
+                out.println(userId + "," + friendId);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to persist friendship: " + e.getMessage());
+        }
+    }
+
+    private void loadFriendsFromFile() {
+        File file = new File(FRIENDS_FILE);
+        if (!file.exists()) {
+            return;
+        }
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            int count = 0;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",", 2);
+                if (parts.length == 2) {
+                    String userId   = parts[0];
+                    String friendId = parts[1];
+
+                    User user = users.get(userId);
+                    if (user != null) {
+                        user.addFriend(friendId);
+                        count++;
+                    }
+                }
+            }
+            System.out.println("Loaded " + count + " friendship links from disk.");
+        } catch (IOException e) {
+            System.err.println("Failed to load friendships: " + e.getMessage());
+        }
+    }
+
+    private void appendBlockedToFile(String userId, String blockedId) {
+        try {
+            File dataDir = new File(DATA_DIR);
+            if (!dataDir.exists()) {
+                dataDir.mkdirs();
+            }
+
+            try (FileWriter fw = new FileWriter(BLOCKED_FILE, true);
+                 BufferedWriter bw = new BufferedWriter(fw);
+                 PrintWriter out = new PrintWriter(bw)) {
+
+                out.println(userId + "," + blockedId);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to persist blocked user: " + e.getMessage());
+        }
+    }
+
+    private void loadBlockedFromFile() {
+        File file = new File(BLOCKED_FILE);
+        if (!file.exists()) {
+            return;
+        }
+
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            int count = 0;
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",", 2);
+                if (parts.length == 2) {
+                    String userId    = parts[0];
+                    String blockedId = parts[1];
+
+                    User user = users.get(userId);
+                    if (user != null) {
+                        user.blockUser(blockedId);
+                        count++;
+                    }
+                }
+            }
+            System.out.println("Loaded " + count + " block relationships from disk.");
+        } catch (IOException e) {
+            System.err.println("Failed to load blocked users: " + e.getMessage());
+        }
+    }
+
+    private void rewriteBlockedFileFromMemory() {
+        try {
+            File dataDir = new File(DATA_DIR);
+            if (!dataDir.exists()) {
+                dataDir.mkdirs();
+            }
+
+            try (FileWriter fw = new FileWriter(BLOCKED_FILE, false);
+                 BufferedWriter bw = new BufferedWriter(fw);
+                 PrintWriter out = new PrintWriter(bw)) {
+
+                for (User u : users.values()) {
+                    for (String blockedId : u.getBlockedUserIds()) {
+                        out.println(u.getUserId() + "," + blockedId);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to rewrite blocked file: " + e.getMessage());
         }
     }
 
@@ -599,7 +833,6 @@ class ClientHandler implements Runnable {
                     sendMessage("HISTORY:" + friendId + ":" + payload);
                 }
                 break;
-
         }
     }
 
