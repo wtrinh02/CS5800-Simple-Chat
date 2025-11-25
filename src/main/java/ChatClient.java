@@ -15,6 +15,16 @@ public class ChatClient {
     private boolean running;
     private String currentServer;
     private Thread listenerThread;
+    private String lastPrintedServer = null;
+
+
+    // ANSI color codes for nicer CLI output
+    private static final String RESET  = "\u001B[0m";
+    private static final String RED    = "\u001B[31m";
+    private static final String GREEN  = "\u001B[32m";
+    private static final String YELLOW = "\u001B[33m";
+    private static final String CYAN   = "\u001B[36m";
+
 
 
     public ChatClient(String userId, String username) {
@@ -50,6 +60,44 @@ public class ChatClient {
             System.err.println("Connection error: " + e.getMessage());
         }
     }
+
+    private void printPrompt() {
+        String serverLabel = (currentServer != null) ? currentServer : "no-server";
+        System.out.print(username + "@" + serverLabel + "> ");
+    }
+
+
+    private void clearCurrentLine() {
+
+        System.out.print("\u001B[1A");
+        System.out.print("\r\u001B[2K");
+    }
+
+
+
+
+    private void printHelp() {
+        System.out.println("\n========= USER COMMANDS =========");
+        System.out.println("add <userId>          - Send friend request");
+        System.out.println("accept <userId>       - Accept friend request");
+        System.out.println("dm <userId> <msg>     - Send direct message");
+        System.out.println("friends               - List online friends");
+        System.out.println("block <userId>        - Block a user");
+        System.out.println("unblock <userId>      - Unblock a user");
+        System.out.println("blocked               - Show blocked users");
+        System.out.println("history <userId>      - Show DM history");
+        System.out.println("\n========= SERVER COMMANDS =======");
+        System.out.println("create <serverId> <name> - Create a server");
+        System.out.println("servers                 - List all servers");
+        System.out.println("join <serverId>         - Join a server");
+        System.out.println("leave <serverId>        - Leave a server");
+        System.out.println("members <serverId>      - List server members");
+        System.out.println("say <message>           - Send message to current server");
+        System.out.println("quit / exit             - Exit");
+        System.out.println("help                    - Show this help");
+        System.out.println("=================================\n");
+    }
+
 
     private void listenForMessages() {
         try {
@@ -98,9 +146,10 @@ public class ChatClient {
                     String senderId = dmParts[0];
                     String senderName = dmParts[1];
                     String content = dmParts[2];
-                    System.out.println("\n[DM from " + senderName + "]: " + content);
+                    System.out.println("\n" + GREEN + "[DM] " + senderName + ": " + content + RESET);
                 }
                 break;
+
 
             case "STATUS":
                 String[] stParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
@@ -108,13 +157,13 @@ public class ChatClient {
                     String friendId = stParts[0];
                     String friendName = stParts[1];
                     String status = stParts[2];
-                    System.out.println("\n[STATUS] " + friendName + " is now " + status);
-                    // Automatically show updated friends list when a friend comes online
-                    if (status.equals("ONLINE")) {
+                    System.out.println("\n" + CYAN + "[STATUS] " + friendName + " is now " + status + RESET);
+                    if ("ONLINE".equals(status)) {
                         getOnlineFriends();
                     }
                 }
                 break;
+
 
             case "FRIENDS":
                 System.out.println("\n=== Online Friends ===");
@@ -135,9 +184,10 @@ public class ChatClient {
 
             case "ERROR":
                 if (parts.length >= 2) {
-                    System.err.println("\n[ERROR] " + parts[1]);
+                    System.err.println("\n" + RED + "[ERROR] " + parts[1] + RESET);
                 }
                 break;
+
 
             case "SERVER_CREATED":
                 String[] scParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
@@ -173,6 +223,7 @@ public class ChatClient {
 
 
             case "SERVER_MSG":
+                // Format: SERVER_MSG:<serverId>:<senderId>:<senderName>:<content>
                 String[] smParts = parts.length >= 2 ? parts[1].split(":", 4) : new String[0];
 
                 if (smParts.length >= 4) {
@@ -181,22 +232,27 @@ public class ChatClient {
                     String senderName = smParts[2];
                     String content = smParts[3];
 
+                    if (!serverId.equals(lastPrintedServer)) {
+                        System.out.println("\n====== [" + serverId.toUpperCase() + "] ======");
+                        lastPrintedServer = serverId;
+                    }
+
+
                     if (senderId.equals("SYSTEM")) {
                         if (serverId.equals(currentServer)) {
-                            System.out.println("\n[* " + serverId + " | SERVER] " + content);
+                            System.out.println(CYAN + "[* " + serverId + " | SERVER] " + content + RESET);
                         } else {
-                            System.out.println("\n[" + serverId + " | SERVER] " + content);
+                            System.out.println(CYAN + "[" + serverId + " | SERVER] " + content + RESET);
                         }
                     } else {
                         if (serverId.equals(currentServer)) {
-                            System.out.println("\n[* " + serverId + " | " + senderName + "] " + content);
+                            System.out.println(CYAN + "[* " + serverId + " | " + senderName + "] " + content + RESET);
                         } else {
-                            System.out.println("\n[" + serverId + " | " + senderName + "] " + content);
+                            System.out.println(CYAN + "[" + serverId + " | " + senderName + "] " + content + RESET);
                         }
                     }
                 }
                 break;
-
 
             case "SERVERS":
                 System.out.println("\n=== Available Servers ===");
@@ -249,9 +305,10 @@ public class ChatClient {
                 if (ddParts.length >= 3) {
                     String receiverName = ddParts[1];
                     String content = ddParts[2];
-                    System.out.println("\n[DELIVERED] Message to " + receiverName + ": " + content);
+                    System.out.println("\n" + GREEN + "[DELIVERED] Message to " + receiverName + ": " + content + RESET);
                 }
                 break;
+
 
             case "BLOCKED":
                 String[] bParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
@@ -309,7 +366,7 @@ public class ChatClient {
                 System.out.println("[SERVER] " + message);
         }
 
-        System.out.print("> ");
+        printPrompt();
     }
 
     public void sendFriendRequest(String friendId) {
@@ -390,29 +447,14 @@ public class ChatClient {
     public void startCLI() {
         Scanner scanner = new Scanner(System.in);
 
-        System.out.println("\n=== Chat Client Commands ===");
-        System.out.println("add <userId>        - Send friend request");
-        System.out.println("accept <userId>     - Accept friend request");
-        System.out.println("dm <userId> <msg>   - Send direct message");
-        System.out.println("friends             - List online friends");
-        System.out.println("block <userId>      - Block a user");
-        System.out.println("unblock <userId>    - Unblock a user");
-        System.out.println("blocked             - Show blocked users");
-        System.out.println("history <userId>    - Show DM history with user");
-        System.out.println("\n=== Server Commands ===");
-        System.out.println("create <serverId> <n> - Create a server");
-        System.out.println("servers             - List all servers");
-        System.out.println("join <serverId>     - Join a server");
-        System.out.println("leave <serverId>    - Leave a server");
-        System.out.println("members <serverId>  - List server members");
-        System.out.println("say <message>       - Send message to current server");
-        System.out.println("quit                - Exit");
-        System.out.println("============================\n");
+        printHelp();
 
         while (running) {
-            System.out.print("> ");
-            String input = scanner.nextLine().trim();
+            printPrompt();
+            String rawInput = scanner.nextLine();
+            clearCurrentLine();
 
+            String input = rawInput.trim();
             if (input.isEmpty()) continue;
 
             String[] parts = input.split("\\s+", 3);
@@ -486,15 +528,14 @@ public class ChatClient {
                     break;
 
                 case "say":
-                    if (currentServer != null && parts.length >= 2) {
+                    if (parts.length >= 2) {
                         String message = input.substring(4).trim();
                         sendServerMessage(currentServer, message);
-                    } else if (currentServer == null) {
-                        System.out.println("You are not in any server. Join a server first.");
                     } else {
                         System.out.println("Usage: say <message>");
                     }
                     break;
+
 
                 case "block":
                     if (parts.length >= 2) {
@@ -522,6 +563,10 @@ public class ChatClient {
                     } else {
                         System.out.println("Usage: history <userId>");
                     }
+                    break;
+
+                case "help":
+                    printHelp();
                     break;
 
                 case "quit":

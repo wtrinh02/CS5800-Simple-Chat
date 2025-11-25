@@ -562,7 +562,9 @@ class ClientHandler implements Runnable {
                     List<String> members = server.getServerMembers(parts[1]);
                     sendMessage("MEMBERS:" + parts[1] + ":" + String.join(",", members));
                 }
-                break;        case "BLOCK_USER":
+                break;
+
+            case "BLOCK_USER":
                 if (parts.length >= 2) {
                     server.blockUser(userId, parts[1]);
                 }
