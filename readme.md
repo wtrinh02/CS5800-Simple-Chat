@@ -2,6 +2,7 @@
 
 A multi-user chat application written in **pure Java** using **sockets and multithreading**.  
 Supports public servers, private messaging, friend requests, real-time status updates, and now persistent users + DM history — all from the terminal.
+
 ---
 
 ## 🚀 Features
