@@ -1,9 +1,12 @@
+import Message.Message;
+import User.User;
+import User.*;
 import org.junit.jupiter.api.*;
 import static org.assertj.core.api.Assertions.*;
 
 import java.util.*;
 
-@DisplayName("UserBuilder Class Tests")
+@DisplayName("User.User.State.UserBuilder Class Tests")
 class UserBuilderTest {
 
     private UserBuilder testUserBuilder;
@@ -26,7 +29,7 @@ class UserBuilderTest {
     class ConstructorTests {
 
         @Test
-        @DisplayName("Should create UserBuilder with default values")
+        @DisplayName("Should create User.User.State.UserBuilder with default values")
         void testConstructorCreatesUserBuilderWithDefaultValues() {
             testUserBuilder = new UserBuilder();
             assertThat(testUserBuilder).isNotNull();
@@ -80,7 +83,7 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("setUserId() should return UserBuilder for chaining")
+        @DisplayName("setUserId() should return User.User.State.UserBuilder for chaining")
         void testSetUserIdReturnsUserBuilderForChaining() {
             UserBuilder returnedBuilder = testUserBuilder.setUserId(TEST_USER_ID);
             assertThat(returnedBuilder).isSameAs(testUserBuilder);
@@ -116,7 +119,7 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("setUsername() should return UserBuilder for chaining")
+        @DisplayName("setUsername() should return User.User.State.UserBuilder for chaining")
         void testSetUsernameReturnsUserBuilderForChaining() {
             UserBuilder returnedBuilder = testUserBuilder.setUsername(TEST_USERNAME);
             assertThat(returnedBuilder).isSameAs(testUserBuilder);
@@ -152,7 +155,7 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("setEmail() should return UserBuilder for chaining")
+        @DisplayName("setEmail() should return User.User.State.UserBuilder for chaining")
         void testSetEmailReturnsUserBuilderForChaining() {
             UserBuilder returnedBuilder = testUserBuilder.setEmail(TEST_EMAIL);
             assertThat(returnedBuilder).isSameAs(testUserBuilder);
@@ -189,7 +192,7 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("setFriendIds() should return UserBuilder for chaining")
+        @DisplayName("setFriendIds() should return User.User.State.UserBuilder for chaining")
         void testSetFriendIdsReturnsUserBuilderForChaining() {
             Set<String> testFriendIds = new HashSet<>();
             UserBuilder returnedBuilder = testUserBuilder.setFriendIds(testFriendIds);
@@ -234,7 +237,7 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("setDirectMessages() should return UserBuilder for chaining")
+        @DisplayName("setDirectMessages() should return User.User.State.UserBuilder for chaining")
         void testSetDirectMessagesReturnsUserBuilderForChaining() {
             Map<String, List<Message>> testDirectMessages = new HashMap<>();
             UserBuilder returnedBuilder = testUserBuilder.setDirectMessages(testDirectMessages);
@@ -269,7 +272,7 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("setOnline() should return UserBuilder for chaining")
+        @DisplayName("setOnline() should return User.User.State.UserBuilder for chaining")
         void testSetOnlineReturnsUserBuilderForChaining() {
             UserBuilder returnedBuilder = testUserBuilder.setOnline(true);
             assertThat(returnedBuilder).isSameAs(testUserBuilder);
@@ -291,7 +294,7 @@ class UserBuilderTest {
     class BuildTests {
 
         @Test
-        @DisplayName("build() should create User with all set properties")
+        @DisplayName("build() should create User.User with all set properties")
         void testBuildCreatesUserWithAllSetProperties() {
             User builtUser = testUserBuilder
                     .setUserId(TEST_USER_ID)
@@ -304,14 +307,14 @@ class UserBuilderTest {
         }
 
         @Test
-        @DisplayName("build() should return non-null User")
+        @DisplayName("build() should return non-null User.User")
         void testBuildReturnsNonNullUser() {
             User builtUser = testUserBuilder.build();
             assertThat(builtUser).isNotNull();
         }
 
         @Test
-        @DisplayName("build() should create User instance")
+        @DisplayName("build() should create User.User instance")
         void testBuildCreatesUserInstance() {
             User builtUser = testUserBuilder.build();
             assertThat(builtUser).isInstanceOf(User.class);
@@ -411,7 +414,7 @@ class UserBuilderTest {
         @Test
         @DisplayName("Should handle special characters in fields")
         void testHandlesSpecialCharactersInFields() {
-            String specialUsername = "User!@#$%";
+            String specialUsername = "User.User!@#$%";
             User builtUser = testUserBuilder.setUsername(specialUsername).build();
             assertThat(builtUser.getUsername()).isEqualTo(specialUsername);
         }

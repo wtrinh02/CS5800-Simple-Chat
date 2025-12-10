@@ -1,3 +1,5 @@
+import Message.Message;
+import User.User;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -6,7 +8,7 @@ import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
 
-@DisplayName("User Class Tests")
+@DisplayName("User.User Class Tests")
 class UserTest {
 
     private User testUser;

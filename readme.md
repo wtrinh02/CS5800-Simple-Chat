@@ -14,7 +14,7 @@ Supports public servers, private messaging, friend requests, real-time status up
 - ✅ Persistent users + DM history (saved even after shutdown)
 - ✅ Auto-loading of friends, history, and blocked list on login
 - ✅ Color-coded terminal UI
-- ✅ Message tagging by server
+- ✅ Message.Message tagging by server
 - ✅ Auto-return to `general` when leaving a server
 - Blocking users
 - DMs between friends only
@@ -45,9 +45,9 @@ src/
          ChatClient.java
          ClientHandler.java
          LocalServer.java
-         Message.java
-         User.java
-         UserBuilder.java
+         Message.Message.java
+         User.User.java
+         User.User.UserBuilder.java
 ```
 
 ---
@@ -107,7 +107,7 @@ java ChatClient u2 Bob
 
 ## 💬 Chat Commands
 
-### User Commands
+### User.User Commands
 ```
 add <userId>        -> Send friend request
 accept <userId>     -> Accept friend request
@@ -190,13 +190,13 @@ If users cannot connect, allow **Java** through Windows Firewall and ensure port
 
 ## 📺 Example Demo Flow
 
-User A:
+User.User A:
 ```
 add u2
 dm u2 Hello!
 ```
 
-User B:
+User.User B:
 ```
 accept u1
 dm u1 Hi Alice!
@@ -233,13 +233,17 @@ u2 Bob
 
 ## 🧠 Design Patterns Used
 
-### 1. Builder Pattern – `UserBuilder`
-The Builder pattern is used to construct complex `User` objects in a clean and readable way without relying on large constructors. Instead of passing many parameters directly into the `User` constructor, the `UserBuilder` class provides chained setter methods such as `setUserId()`, `setUsername()`, and `setEmail()`, followed by a `build()` method to finalize creation.
+### 1. Builder Pattern – `User.User.UserBuilder`
+The Builder pattern is used to construct complex `User.User` objects in a clean and readable way without relying on large constructors. Instead of passing many parameters directly into the `User.User` constructor, the `User.User.UserBuilder` class provides chained setter methods such as `setUserId()`, `setUsername()`, and `setEmail()`, followed by a `build()` method to finalize creation.
 
-This improves code readability, avoids telescoping constructors, and allows future expansion of the `User` class without breaking existing logic.
+This improves code readability, avoids telescoping constructors, and allows future expansion of the `User.User` class without breaking existing logic.
 
 Example usage in `ChatServer`:
+
 ```java
+import User.User;
+import User.UserBuilder;
+
 User user = new UserBuilder()
         .setUserId(userId)
         .setUsername(username)
@@ -265,8 +269,98 @@ By using the Mediator pattern, the system becomes more modular, scalable, and ea
 
 ---
 
+### 3. Factory Method Pattern — Centralized Message Creation
+
+The MessageFactory class introduces a clean and extensible way to create all message types in the system.
+
+Instead of instantiating new Message(...) throughout the codebase, the server now uses:
+```java
+MessageFactory.directMessage(...);
+MessageFactory.friendRequest(...);
+MessageFactory.userOnline(...);
+MessageFactory.serverJoin(...);
+```
+Benefits:
+- Centralizes all message creation logic
+- Ensures consistent message formatting
+- Makes adding new message types trivial
+- Reduces duplicate code inside ChatServer and ClientHandler
+
+This pattern greatly simplified the message-handling pipeline and prepared it for future extensibility such as media messages, push notifications, and system alerts.
+
+---
+
+### 4. State Pattern — User.User Online/Offline Behavior
+
+The User.User class now uses the State Pattern to represent online/offline status:
+
+```java 
+import User.State.OfflineState;
+import User.State.OnlineState;
+import User.State.UserState;
+
+UserState
+├──OnlineState
+└──OfflineState
+```
+
+The user's state dynamically changes when connecting or disconnecting:
+
+```java 
+import User.State.OfflineState;
+import User.State.OnlineState;user.setState(new OnlineState());
+        user.
+
+setState(new OfflineState());
+```
+Benefits:
+- Encapsulates behavior depending on whether a user is online
+- Removes scattered boolean checks (if(online) ...)
+- Makes extending status easy (e.g., Away, Do Not Disturb, Invisible)
+- More closely models real chat applications where user status is dynamic
+
+This pattern lays the foundation for richer presence systems in a future UI (React or mobile app).
+
+---
+
+### 5. Decorator Pattern — Extensible Message Enhancements (Images, Files, etc.)
+
+The Decorator Pattern was added to support enhancing messages without modifying the core Message class.
+
+New decorators include:
+```java
+MessageDecorator
+├── ImageMessage
+└── FileMessage
+```
+
+Example usage:
+```java
+Message msg = MessageFactory.directMessage("alice", "bob", "Check this out!");
+Message imageMsg = new ImageMessage(msg, "/images/cat.png");
+```
+Benefits:
+- Adds features to messages without altering the base class
+- Supports future UI upgrades (React frontend, rich message rendering)
+- Encourages reusable and composable message features
+- Makes it easy to introduce audio, video, emoji reactions, etc.
+
+Even though the console client cannot display images or files yet, the architecture now fully supports media messages once a frontend exists.
+
+---
+
+## ⭐ Summary of Newly Added Patterns
+| Pattern               | Implemented In                                    | Purpose                                          |
+| --------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| **Factory Method**    | `MessageFactory`                                  | Centralized creation of all message types        |
+| **State Pattern**     | `State.UserState`, `State.OnlineState`, `State.OfflineState`        | Clean handling of user presence/status           |
+| **Decorator Pattern** | `MessageDecorator`, `ImageMessage`, `FileMessage` | Extensible message functionality (images, files) |
+
+
+---
+
 ## Goals for the Final Product
-- Add 3 more design patterns TBD
+- Add 3 more design patterns TBD ✅
 - Update Persistence to use a Database instead
 - Create a better frontend UI to improve user quality
 - Implement different types of messages (img,file,video)

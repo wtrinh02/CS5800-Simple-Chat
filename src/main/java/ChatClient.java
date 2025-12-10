@@ -305,7 +305,7 @@ public class ChatClient {
                 if (ddParts.length >= 3) {
                     String receiverName = ddParts[1];
                     String content = ddParts[2];
-                    System.out.println("\n" + GREEN + "[DELIVERED] Message to " + receiverName + ": " + content + RESET);
+                    System.out.println("\n" + GREEN + "[DELIVERED] Message.Message to " + receiverName + ": " + content + RESET);
                 }
                 break;
 

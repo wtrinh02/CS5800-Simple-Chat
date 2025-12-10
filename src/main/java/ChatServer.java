@@ -1,3 +1,9 @@
+import Message.*;
+import User.State.*;
+import User.*;
+import User.UserBuilder;
+
+
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -17,13 +23,14 @@ public class ChatServer {
     private final Map<String, LocalServer> localServers;
     private final ExecutorService threadPool;
     private ServerSocket serverSocket;
+    private MessageFactory MessageFactory;
 
     public ChatServer() {
+        MessageFactory = new MessageFactory();
         this.users = new ConcurrentHashMap<>();
         this.onlineClients = new ConcurrentHashMap<>();
         this.localServers = new ConcurrentHashMap<>();
         this.threadPool = Executors.newCachedThreadPool();
-
 
         loadUsersFromFile();
         loadFriendsFromFile();
@@ -59,61 +66,58 @@ public class ChatServer {
                     .build();
             users.put(userId, user);
             appendUserToFile(user);
-            System.out.println("User registered: " + username);
+            System.out.println("User.User registered: " + username);
         }
     }
 
     public synchronized void connectUser(String userId, ClientHandler handler) {
         User user = users.get(userId);
         if (user != null) {
+            user.setState(new OnlineState());
             user.setOnline(true);
             onlineClients.put(userId, handler);
+
+            Message onlineMsg = MessageFactory.userOnline(user.getUsername());
+            broadcastToServer("general", "SERVER_MSG:general:SYSTEM:SYSTEM:" + onlineMsg.getContent());
 
             LocalServer generalServer = localServers.get("general");
             if (generalServer != null) {
                 generalServer.addMember(userId);
                 handler.sendMessage("SERVER_JOINED:general:" + generalServer.getServerName());
 
-                Message joinMessage = new Message(
-                        UUID.randomUUID().toString(),
-                        "SYSTEM",
-                        "general",
-                        user.getUsername() + " joined the server",
-                        Message.MessageType.SERVER_JOIN
-                );
+                Message joinMessage = MessageFactory.serverJoin(user.getUsername(), "general");
                 broadcastToServer("general",
                         "SERVER_MSG:general:SYSTEM:SYSTEM:" + joinMessage.getContent()
                 );
             }
 
             notifyFriendsOnlineStatus(userId, true);
-            System.out.println("User connected: " + user.getUsername());
+            System.out.println("User.User connected: " + user.getUsername());
         }
     }
 
     public synchronized void disconnectUser(String userId) {
         User user = users.get(userId);
         if (user != null) {
+            user.setState(new OfflineState());
             user.setOnline(false);
             onlineClients.remove(userId);
+
+            Message offlineMsg = MessageFactory.userOffline(user.getUsername());
+            broadcastToServer("general", "SERVER_MSG:general:SYSTEM:SYSTEM:" + offlineMsg.getContent());
 
             LocalServer generalServer = localServers.get("general");
             if (generalServer != null && generalServer.isMember(userId)) {
                 generalServer.removeMember(userId);
-                Message leaveMessage = new Message(
-                        UUID.randomUUID().toString(),
-                        "SYSTEM",
-                        "general",
-                        user.getUsername() + " left the server",
-                        Message.MessageType.SERVER_LEAVE
-                );
+
+                Message leaveMessage = MessageFactory.serverLeave(user.getUsername(), "general");
                 broadcastToServer("general",
                         "SERVER_MSG:general:SYSTEM:SYSTEM:" + leaveMessage.getContent()
                 );
             }
 
             notifyFriendsOnlineStatus(userId, false);
-            System.out.println("User disconnected: " + user.getUsername());
+            System.out.println("User.User disconnected: " + user.getUsername());
         }
     }
 
@@ -122,7 +126,7 @@ public class ChatServer {
         User receiver = users.get(receiverId);
 
         if (sender == null || receiver == null) {
-            sendToClient(senderId, "ERROR: User not found");
+            sendToClient(senderId, "ERROR: User.User not found");
             return;
         }
         if (receiver.hasBlocked(senderId)) {
@@ -130,13 +134,7 @@ public class ChatServer {
             return;
         }
 
-        Message friendRequest = new Message(
-                UUID.randomUUID().toString(),
-                senderId,
-                receiverId,
-                sender.getUsername() + " wants to be your friend!",
-                Message.MessageType.FRIEND_REQUEST
-        );
+        Message friendRequest = MessageFactory.friendRequest(senderId, receiverId);
 
         sendToClient(receiverId, "FRIEND_REQUEST:" + senderId + ":" + sender.getUsername());
         System.out.println("Friend request: " + senderId + " -> " + receiverId);
@@ -147,13 +145,12 @@ public class ChatServer {
         User friend = users.get(friendId);
 
         if (user == null || friend == null) {
-            sendToClient(userId, "ERROR: User not found");
+            sendToClient(userId, "ERROR: User.User not found");
             return;
         }
 
         user.addFriend(friendId);
         friend.addFriend(userId);
-
 
         appendFriendshipToFile(userId, friendId);
         appendFriendshipToFile(friendId, userId);
@@ -169,7 +166,7 @@ public class ChatServer {
         User receiver = users.get(receiverId);
 
         if (sender == null || receiver == null) {
-            sendToClient(senderId, "ERROR: User not found");
+            sendToClient(senderId, "ERROR: User.User not found");
             return;
         }
 
@@ -183,18 +180,11 @@ public class ChatServer {
             return;
         }
 
-        Message message = new Message(
-                UUID.randomUUID().toString(),
-                senderId,
-                receiverId,
-                content,
-                Message.MessageType.DIRECT_MESSAGE
-        );
+        Message message = MessageFactory.directMessage(senderId, receiverId, content);
 
         String conversationId = getConversationId(senderId, receiverId);
         sender.addDirectMessage(conversationId, message);
         receiver.addDirectMessage(conversationId, message);
-
 
         appendDmToFile(conversationId, message);
 
@@ -223,7 +213,7 @@ public class ChatServer {
         User target = users.get(blockedId);
 
         if (user == null || target == null) {
-            sendToClient(userId, "ERROR: User not found");
+            sendToClient(userId, "ERROR: User.User not found");
             return;
         }
 
@@ -237,7 +227,7 @@ public class ChatServer {
         User target = users.get(blockedId);
 
         if (user == null || target == null) {
-            sendToClient(userId, "ERROR: User not found");
+            sendToClient(userId, "ERROR: User.User not found");
             return;
         }
 
@@ -344,11 +334,11 @@ public class ChatServer {
             localServers.put(serverId, server);
             sendToClient(ownerId, "SERVER_CREATED:" + serverId + ":" + serverName);
 
-            for (String userId : onlineClients.keySet()) {
-                if (!userId.equals(ownerId)) {
+            for (String uid : onlineClients.keySet()) {
+                if (!uid.equals(ownerId)) {
                     User creator = users.get(ownerId);
                     String creatorName = creator != null ? creator.getUsername() : "Unknown";
-                    sendToClient(userId, "NEW_SERVER:" + serverId + ":" + serverName + ":" + creatorName);
+                    sendToClient(uid, "NEW_SERVER:" + serverId + ":" + serverName + ":" + creatorName);
                 }
             }
 
@@ -373,13 +363,8 @@ public class ChatServer {
 
         sendToClient(userId, "SERVER_JOINED:" + serverId + ":" + server.getServerName());
 
-        Message joinMessage = new Message(
-                UUID.randomUUID().toString(),
-                "SYSTEM",
-                serverId,
-                user.getUsername() + " joined the server",
-                Message.MessageType.SERVER_JOIN
-        );
+        Message joinMessage = MessageFactory.serverJoin(user.getUsername(), serverId);
+
         broadcastToServer(serverId,
                 "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + joinMessage.getContent()
         );
@@ -403,13 +388,8 @@ public class ChatServer {
         server.removeMember(userId);
         sendToClient(userId, "SERVER_LEFT:" + serverId);
 
-        Message leaveMessage = new Message(
-                UUID.randomUUID().toString(),
-                "SYSTEM",
-                serverId,
-                user.getUsername() + " left the server",
-                Message.MessageType.SERVER_LEAVE
-        );
+        Message leaveMessage = MessageFactory.serverLeave(user.getUsername(), serverId);
+
         broadcastToServer(serverId,
                 "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + leaveMessage.getContent()
         );
@@ -435,13 +415,7 @@ public class ChatServer {
             return;
         }
 
-        Message message = new Message(
-                UUID.randomUUID().toString(),
-                userId,
-                serverId,
-                content,
-                Message.MessageType.SERVER_MESSAGE
-        );
+        Message message = MessageFactory.serverMessage(userId, serverId, content);
 
         server.addMessage(message);
         broadcastToServer(serverId,
@@ -494,7 +468,6 @@ public class ChatServer {
             System.err.println("Error shutting down server: " + e.getMessage());
         }
     }
-
 
     private void loadUsersFromFile() {
         File file = new File(USERS_FILE);
@@ -560,7 +533,6 @@ public class ChatServer {
                  BufferedWriter bw = new BufferedWriter(fw);
                  PrintWriter out = new PrintWriter(bw)) {
 
-                // Store: timestamp|senderId|receiverId|content|type
                 out.println(message.getFormattedTimestamp() + "|" +
                         message.getSenderId() + "|" +
                         message.getReceiverId() + "|" +

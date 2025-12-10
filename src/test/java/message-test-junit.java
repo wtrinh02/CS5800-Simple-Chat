@@ -1,3 +1,4 @@
+import Message.Message;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -6,7 +7,7 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.*;
 
-@DisplayName("Message Class Tests")
+@DisplayName("Message.Message Class Tests")
 class MessageTest {
 
     private Message testMessage;
@@ -226,7 +227,7 @@ class MessageTest {
     }
 
     @Nested
-    @DisplayName("Message Type Tests")
+    @DisplayName("Message.Message Type Tests")
     class MessageTypeTests {
 
         @ParameterizedTest
@@ -386,7 +387,7 @@ class MessageTest {
     class ImmutabilityTests {
 
         @Test
-        @DisplayName("Message fields should be immutable after creation")
+        @DisplayName("Message.Message fields should be immutable after creation")
         void testMessageFieldsAreImmutableAfterCreation() {
             testMessage = new Message("msg1", "user1", "user2", "Hello", Message.MessageType.DIRECT_MESSAGE);
             String originalMessageId = testMessage.getMessageId();

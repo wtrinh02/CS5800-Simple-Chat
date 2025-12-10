@@ -1,3 +1,4 @@
+import Message.Message;
 import org.junit.jupiter.api.*;
 import static org.assertj.core.api.Assertions.*;
 
