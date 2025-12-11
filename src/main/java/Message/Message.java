@@ -3,13 +3,8 @@ package Message;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
+
 public class Message {
-    private final String messageId;
-    private final String senderId;
-    private final String receiverId;
-    private final String content;
-    private final LocalDateTime timestamp;
-    private final MessageType type;
 
     public enum MessageType {
         DIRECT_MESSAGE,
@@ -23,54 +18,67 @@ public class Message {
         SERVER_LEAVE
     }
 
-    public Message(String messageId, String senderId, String receiverId,
-                   String content, MessageType type) {
-        this.messageId = messageId;
+    private final String id;
+    private final String senderId;
+    private final String receiverId;   // or serverId
+    private final String content;
+    private final MessageType type;
+    private final long timestamp;
+
+    // ---- MAIN CONSTRUCTOR (DATABASE + FULL CONTROL) ----
+    public Message(String id, String senderId, String receiverId,
+                   String content, MessageType type, long timestamp) {
+        this.id = id;
         this.senderId = senderId;
         this.receiverId = receiverId;
         this.content = content;
-        this.timestamp = LocalDateTime.now();
         this.type = type;
+        this.timestamp = timestamp;
     }
 
-    public String getMessageId() {
-        return messageId;
+    // ---- DEFAULT CONSTRUCTOR (auto timestamp) ----
+    public Message(String id, String senderId, String receiverId,
+                   String content, MessageType type) {
+        this(id, senderId, receiverId, content, type, System.currentTimeMillis());
     }
 
-    public String getSenderId() {
-        return senderId;
-    }
-
-    public String getReceiverId() {
-        return receiverId;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public LocalDateTime getTimestamp() {
-        return timestamp;
-    }
-
-    public MessageType getType() {
-        return type;
-    }
+    public String getId() { return id; }
+    public String getSenderId() { return senderId; }
+    public String getReceiverId() { return receiverId; }
+    public String getContent() { return content; }
+    public MessageType getType() { return type; }
+    public long getTimestamp() { return timestamp; }
 
     public String getFormattedTimestamp() {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        return timestamp.format(formatter);
+        java.text.SimpleDateFormat fmt =
+                new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        return fmt.format(new java.util.Date(timestamp));
     }
+
 
     @Override
     public String toString() {
-        return String.format("[%s] %s -> %s: %s (Type: %s)",
-                getFormattedTimestamp(), senderId, receiverId, content, type);
+        return String.format(
+                "[%s] %s -> %s: %s (Type: %s)",
+                getFormattedTimestamp(),
+                senderId,
+                receiverId,
+                content,
+                type
+        );
     }
 
+
     public String toDisplayString() {
-        return String.format("[%s] %s: %s",
-                timestamp.format(DateTimeFormatter.ofPattern("HH:mm:ss")),
-                senderId, content);
+        java.text.SimpleDateFormat fmt =
+                new java.text.SimpleDateFormat("HH:mm:ss");
+
+        return String.format(
+                "[%s] %s: %s",
+                fmt.format(new java.util.Date(timestamp)),
+                senderId,
+                content
+        );
     }
+
 }

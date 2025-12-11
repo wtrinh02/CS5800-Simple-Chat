@@ -17,15 +17,12 @@ public class ChatClient {
     private Thread listenerThread;
     private String lastPrintedServer = null;
 
-
     // ANSI color codes for nicer CLI output
     private static final String RESET  = "\u001B[0m";
     private static final String RED    = "\u001B[31m";
     private static final String GREEN  = "\u001B[32m";
     private static final String YELLOW = "\u001B[33m";
     private static final String CYAN   = "\u001B[36m";
-
-
 
     public ChatClient(String userId, String username) {
         this(userId, username, "localhost");
@@ -45,14 +42,13 @@ public class ChatClient {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
 
-
+            // Register with server
             sendCommand("REGISTER:" + userId + ":" + username + ":user@example.com");
 
-
+            // Listener thread
             listenerThread = new Thread(this::listenForMessages);
-            listenerThread.setDaemon(true);   // <- add this
+            listenerThread.setDaemon(true);
             listenerThread.start();
-
 
             System.out.println("Connected to chat server " + serverHost + ":" + SERVER_PORT + " as " + username);
 
@@ -66,15 +62,10 @@ public class ChatClient {
         System.out.print(username + "@" + serverLabel + "> ");
     }
 
-
     private void clearCurrentLine() {
-
         System.out.print("\u001B[1A");
         System.out.print("\r\u001B[2K");
     }
-
-
-
 
     private void printHelp() {
         System.out.println("\n========= USER COMMANDS =========");
@@ -97,7 +88,6 @@ public class ChatClient {
         System.out.println("help                    - Show this help");
         System.out.println("=================================\n");
     }
-
 
     private void listenForMessages() {
         try {
@@ -123,15 +113,16 @@ public class ChatClient {
                 }
                 break;
 
-            case "FRIEND_REQUEST":
+            case "FRIEND_REQUEST": {
                 String[] frParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (frParts.length >= 2) {
                     System.out.println("\n[FRIEND REQUEST] " + frParts[1] + " (ID: " + frParts[0] + ") wants to be your friend!");
                     System.out.println("To accept, type: accept " + frParts[0]);
                 }
                 break;
+            }
 
-            case "FRIEND_ADDED":
+            case "FRIEND_ADDED": {
                 String[] faParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (faParts.length >= 2) {
                     System.out.println("\n[FRIEND ADDED] You are now friends with " + faParts[1] + " (ID: " + faParts[0] + ")");
@@ -139,22 +130,22 @@ public class ChatClient {
                     getOnlineFriends();
                 }
                 break;
+            }
 
-            case "DM":
+            case "DM": {
+                // Server now sends DISPLAY text already decorated (time + sender if needed)
+                // Format: DM:<senderId>:<senderName>:<displayString>
                 String[] dmParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (dmParts.length >= 3) {
-                    String senderId = dmParts[0];
-                    String senderName = dmParts[1];
-                    String content = dmParts[2];
-                    System.out.println("\n" + GREEN + "[DM] " + senderName + ": " + content + RESET);
+                    String display = dmParts[2]; // already formatted by decorators
+                    System.out.println("\n" + GREEN + "[DM] " + display + RESET);
                 }
                 break;
+            }
 
-
-            case "STATUS":
+            case "STATUS": {
                 String[] stParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (stParts.length >= 3) {
-                    String friendId = stParts[0];
                     String friendName = stParts[1];
                     String status = stParts[2];
                     System.out.println("\n" + CYAN + "[STATUS] " + friendName + " is now " + status + RESET);
@@ -163,7 +154,7 @@ public class ChatClient {
                     }
                 }
                 break;
-
+            }
 
             case "FRIENDS":
                 System.out.println("\n=== Online Friends ===");
@@ -188,16 +179,16 @@ public class ChatClient {
                 }
                 break;
 
-
-            case "SERVER_CREATED":
+            case "SERVER_CREATED": {
                 String[] scParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (scParts.length >= 2) {
                     System.out.println("\n[SERVER CREATED] Server '" + scParts[1] + "' (ID: " + scParts[0] + ") created successfully!");
                     currentServer = scParts[0];
                 }
                 break;
+            }
 
-            case "SERVER_JOINED":
+            case "SERVER_JOINED": {
                 String[] sjParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (sjParts.length >= 2) {
                     System.out.println("\n[JOINED SERVER] You joined '" + sjParts[1] + "' (ID: " + sjParts[0] + ")");
@@ -207,6 +198,7 @@ public class ChatClient {
                     }
                 }
                 break;
+            }
 
             case "SERVER_LEFT":
                 if (parts.length >= 2) {
@@ -221,38 +213,40 @@ public class ChatClient {
                 }
                 break;
 
-
-            case "SERVER_MSG":
-                // Format: SERVER_MSG:<serverId>:<senderId>:<senderName>:<content>
+            case "SERVER_MSG": {
+                // Format from server:
+                // SERVER_MSG:<serverId>:<senderId>:<senderName>:<displayString>
                 String[] smParts = parts.length >= 2 ? parts[1].split(":", 4) : new String[0];
 
                 if (smParts.length >= 4) {
                     String serverId = smParts[0];
                     String senderId = smParts[1];
-                    String senderName = smParts[2];
-                    String content = smParts[3];
+                    String senderName = smParts[2]; // unused for formatting now
+                    String display = smParts[3];    // already decorated string
 
                     if (!serverId.equals(lastPrintedServer)) {
                         System.out.println("\n====== [" + serverId.toUpperCase() + "] ======");
                         lastPrintedServer = serverId;
                     }
 
-
                     if (senderId.equals("SYSTEM")) {
+                        // System messages: server tag + decorated content
                         if (serverId.equals(currentServer)) {
-                            System.out.println(CYAN + "[* " + serverId + " | SERVER] " + content + RESET);
+                            System.out.println(CYAN + "[* " + serverId + " | SERVER] " + display + RESET);
                         } else {
-                            System.out.println(CYAN + "[" + serverId + " | SERVER] " + content + RESET);
+                            System.out.println(CYAN + "[" + serverId + " | SERVER] " + display + RESET);
                         }
                     } else {
+                        // Normal messages: use decorated content (already has time/sender as per decorators)
                         if (serverId.equals(currentServer)) {
-                            System.out.println(CYAN + "[* " + serverId + " | " + senderName + "] " + content + RESET);
+                            System.out.println(CYAN + "[* " + serverId + "] " + display + RESET);
                         } else {
-                            System.out.println(CYAN + "[" + serverId + " | " + senderName + "] " + content + RESET);
+                            System.out.println(CYAN + "[" + serverId + "] " + display + RESET);
                         }
                     }
                 }
                 break;
+            }
 
             case "SERVERS":
                 System.out.println("\n=== Available Servers ===");
@@ -260,8 +254,13 @@ public class ChatClient {
                     String[] servers = parts[1].split(",");
                     for (String server : servers) {
                         String[] serverParts = server.split(":");
-                        if (serverParts.length >= 3) {
-                            System.out.println("  - " + serverParts[1] + " (ID: " + serverParts[0] + ", Members: " + serverParts[2] + ")");
+                        if (serverParts.length >= 2) {
+                            // DB version only returns id:name, so handle 2 parts
+                            if (serverParts.length == 2) {
+                                System.out.println("  - " + serverParts[1] + " (ID: " + serverParts[0] + ")");
+                            } else if (serverParts.length >= 3) {
+                                System.out.println("  - " + serverParts[1] + " (ID: " + serverParts[0] + ", Members: " + serverParts[2] + ")");
+                            }
                         }
                     }
                 } else {
@@ -269,7 +268,7 @@ public class ChatClient {
                 }
                 break;
 
-            case "MEMBERS":
+            case "MEMBERS": {
                 System.out.println("\n=== Server Members ===");
                 String[] memParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (memParts.length >= 2) {
@@ -288,8 +287,9 @@ public class ChatClient {
                     System.out.println("No member data received.");
                 }
                 break;
+            }
 
-            case "NEW_SERVER":
+            case "NEW_SERVER": {
                 String[] nsParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (nsParts.length >= 3) {
                     String newServerId = nsParts[0];
@@ -299,30 +299,34 @@ public class ChatClient {
                     System.out.println("Type 'join " + newServerId + "' to join this server!");
                 }
                 break;
+            }
 
-            case "DM_DELIVERED":
+            case "DM_DELIVERED": {
+                // Format: DM_DELIVERED:<receiverId>:<receiverName>:<displayString>
                 String[] ddParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (ddParts.length >= 3) {
                     String receiverName = ddParts[1];
-                    String content = ddParts[2];
-                    System.out.println("\n" + GREEN + "[DELIVERED] Message.Message to " + receiverName + ": " + content + RESET);
+                    String display = ddParts[2]; // already decorated
+                    System.out.println("\n" + GREEN + "[DELIVERED] To " + receiverName + ": " + display + RESET);
                 }
                 break;
+            }
 
-
-            case "BLOCKED":
+            case "BLOCKED": {
                 String[] bParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (bParts.length >= 2) {
                     System.out.println("\n[BLOCKED] You blocked " + bParts[1] + " (ID: " + bParts[0] + ")");
                 }
                 break;
+            }
 
-            case "UNBLOCKED":
+            case "UNBLOCKED": {
                 String[] ubParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (ubParts.length >= 2) {
                     System.out.println("\n[UNBLOCKED] You unblocked " + ubParts[1] + " (ID: " + ubParts[0] + ")");
                 }
                 break;
+            }
 
             case "BLOCKED_LIST":
                 System.out.println("\n=== Blocked Users ===");
@@ -339,7 +343,7 @@ public class ChatClient {
                 }
                 break;
 
-            case "HISTORY":
+            case "HISTORY": {
                 String[] hParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (hParts.length >= 1) {
                     String friendId = hParts[0];
@@ -360,7 +364,7 @@ public class ChatClient {
                     }
                 }
                 break;
-
+            }
 
             default:
                 System.out.println("[SERVER] " + message);
@@ -368,6 +372,8 @@ public class ChatClient {
 
         printPrompt();
     }
+
+    // ----------------- COMMAND WRAPPERS -----------------
 
     public void sendFriendRequest(String friendId) {
         sendCommand("FRIEND_REQUEST:" + friendId);
@@ -426,7 +432,6 @@ public class ChatClient {
             joinLocalServer("general");
             currentServer = "general";
         }
-
         sendCommand("SERVER_MSG:" + serverId + ":" + content);
     }
 
@@ -443,6 +448,8 @@ public class ChatClient {
             out.println(command);
         }
     }
+
+    // ----------------- CLI LOOP -----------------
 
     public void startCLI() {
         Scanner scanner = new Scanner(System.in);
@@ -529,13 +536,12 @@ public class ChatClient {
 
                 case "say":
                     if (parts.length >= 2) {
-                        String message = input.substring(4).trim();
-                        sendServerMessage(currentServer, message);
+                        String msg = input.substring(4).trim();
+                        sendServerMessage(currentServer, msg);
                     } else {
                         System.out.println("Usage: say <message>");
                     }
                     break;
-
 
                 case "block":
                     if (parts.length >= 2) {
@@ -576,7 +582,6 @@ public class ChatClient {
                     System.exit(0);
                     return;
 
-
                 default:
                     System.out.println("Unknown command: " + command);
             }
@@ -589,15 +594,13 @@ public class ChatClient {
         running = false;
         try {
             if (socket != null && !socket.isClosed()) {
-                socket.close();  // this will also close in/out underneath
+                socket.close();
             }
             System.out.println("Disconnected from server.");
         } catch (IOException e) {
             System.err.println("Error disconnecting: " + e.getMessage());
         }
     }
-
-
 
     public static void main(String[] args) {
         if (args.length < 2) {

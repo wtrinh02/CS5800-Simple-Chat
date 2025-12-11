@@ -1,46 +1,63 @@
 import Message.*;
+import Message.Decorator.BaseMessage;
+import Message.Decorator.MessageComponent;
+import Message.Decorator.SenderNameDecorator;
+import Message.Decorator.TimestampDecorator;
+
 import User.State.*;
 import User.*;
 import User.UserBuilder;
-
 
 import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 
+import db.dao.UserDAO;
+import db.dao.FriendDAO;
+import db.dao.BlockedDAO;
+import db.dao.DMDAO;
+import db.dao.ServerDAO;
+import db.dao.ServerMessageDAO;
+
 public class ChatServer {
     private static final int PORT = 8888;
 
-    private static final String DATA_DIR      = "data";
-    private static final String USERS_FILE    = DATA_DIR + File.separator + "users.csv";
-    private static final String DM_DIR        = DATA_DIR + File.separator + "dm";
-    private static final String FRIENDS_FILE  = DATA_DIR + File.separator + "friends.csv";
-    private static final String BLOCKED_FILE  = DATA_DIR + File.separator + "blocked.csv";
+    // --- DAOs (database layer) ---
+    private final UserDAO userDAO = new UserDAO();
+    private final FriendDAO friendDAO = new FriendDAO();
+    private final BlockedDAO blockedDAO = new BlockedDAO();
+    private final DMDAO dmDAO = new DMDAO();
+    private final ServerDAO serverDAO = new ServerDAO();
+    private final ServerMessageDAO serverMessageDAO = new ServerMessageDAO();
 
-    private final Map<String, User> users;
-    private final Map<String, ClientHandler> onlineClients;
-    private final Map<String, LocalServer> localServers;
+    // --- In-memory runtime layer ---
+    private final Map<String, User> users;                 // userId -> User
+    private final Map<String, ClientHandler> onlineClients;// userId -> connection
+    private final Map<String, LocalServer> localServers;   // serverId -> LocalServer
     private final ExecutorService threadPool;
     private ServerSocket serverSocket;
-    private MessageFactory MessageFactory;
+    private MessageFactory messageFactory;
 
     public ChatServer() {
-        MessageFactory = new MessageFactory();
+        this.messageFactory = new MessageFactory();
         this.users = new ConcurrentHashMap<>();
         this.onlineClients = new ConcurrentHashMap<>();
         this.localServers = new ConcurrentHashMap<>();
         this.threadPool = Executors.newCachedThreadPool();
 
-        loadUsersFromFile();
-        loadFriendsFromFile();
-        loadBlockedFromFile();
-
+        // Create default "general" server (DB + in-memory)
+        if (!serverDAO.exists("general")) {
+            serverDAO.createServer("general", "General", "SYSTEM");
+        }
         LocalServer generalServer = new LocalServer("general", "General", "SYSTEM");
         localServers.put("general", generalServer);
         System.out.println("Default 'General' server created");
     }
 
+    // -------------------------------------------------------------------------
+    // SERVER LIFECYCLE
+    // -------------------------------------------------------------------------
     public void start() {
         try {
             serverSocket = new ServerSocket(PORT);
@@ -56,44 +73,82 @@ public class ChatServer {
         }
     }
 
+    public void shutdown() {
+        try {
+            threadPool.shutdown();
+            if (serverSocket != null) serverSocket.close();
+        } catch (IOException e) {
+            System.err.println("Error shutting down server: " + e.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // USERS
+    // -------------------------------------------------------------------------
     public synchronized void registerUser(String userId, String username, String email) {
+        // 1. Persist in DB
+        if (!userDAO.exists(userId)) {
+            userDAO.createUser(userId, username, email);
+        }
+
+        // 2. In-memory
         if (!users.containsKey(userId)) {
             User user = new UserBuilder()
                     .setUserId(userId)
                     .setUsername(username)
                     .setEmail(email)
-                    .setOnline(true)
+                    .setOnline(false)
                     .build();
             users.put(userId, user);
-            appendUserToFile(user);
-            System.out.println("User.User registered: " + username);
+            System.out.println("User registered: " + username);
         }
     }
 
     public synchronized void connectUser(String userId, ClientHandler handler) {
         User user = users.get(userId);
-        if (user != null) {
-            user.setState(new OnlineState());
-            user.setOnline(true);
-            onlineClients.put(userId, handler);
 
-            Message onlineMsg = MessageFactory.userOnline(user.getUsername());
-            broadcastToServer("general", "SERVER_MSG:general:SYSTEM:SYSTEM:" + onlineMsg.getContent());
-
-            LocalServer generalServer = localServers.get("general");
-            if (generalServer != null) {
-                generalServer.addMember(userId);
-                handler.sendMessage("SERVER_JOINED:general:" + generalServer.getServerName());
-
-                Message joinMessage = MessageFactory.serverJoin(user.getUsername(), "general");
-                broadcastToServer("general",
-                        "SERVER_MSG:general:SYSTEM:SYSTEM:" + joinMessage.getContent()
-                );
+        // Load from DB if needed
+        if (user == null) {
+            db.model.DbUser dbUser = userDAO.getUserById(userId);
+            if (dbUser == null) {
+                handler.sendMessage("ERROR: User not found");
+                return;
             }
-
-            notifyFriendsOnlineStatus(userId, true);
-            System.out.println("User.User connected: " + user.getUsername());
+            user = new UserBuilder()
+                    .setUserId(dbUser.id())
+                    .setUsername(dbUser.username())
+                    .setEmail(dbUser.email())
+                    .setOnline(false)
+                    .build();
+            users.put(userId, user);
         }
+
+        user.setState(new OnlineState());
+        user.setOnline(true);
+        onlineClients.put(userId, handler);
+        userDAO.setOnline(userId, true);
+
+        // System: user online (time msg)
+        Message onlineMsg = messageFactory.userOnline(user.getUsername());
+        String displayOnline = formatForDisplay(onlineMsg);
+        broadcastToServer("general", "SERVER_MSG:general:SYSTEM:SYSTEM:" + displayOnline);
+
+        LocalServer generalServer = localServers.get("general");
+        if (generalServer != null) {
+            serverDAO.addMember("general", userId);
+            generalServer.addMember(userId);
+            handler.sendMessage("SERVER_JOINED:general:" + generalServer.getServerName());
+
+            Message joinMessage = messageFactory.serverJoin(user.getUsername(), "general");
+            String displayJoin = formatForDisplay(joinMessage);
+            broadcastToServer(
+                    "general",
+                    "SERVER_MSG:general:SYSTEM:SYSTEM:" + displayJoin
+            );
+        }
+
+        notifyFriendsOnlineStatus(userId, true);
+        System.out.println("User connected: " + user.getUsername());
     }
 
     public synchronized void disconnectUser(String userId) {
@@ -102,58 +157,73 @@ public class ChatServer {
             user.setState(new OfflineState());
             user.setOnline(false);
             onlineClients.remove(userId);
+            userDAO.setOnline(userId, false);
 
-            Message offlineMsg = MessageFactory.userOffline(user.getUsername());
-            broadcastToServer("general", "SERVER_MSG:general:SYSTEM:SYSTEM:" + offlineMsg.getContent());
+            Message offlineMsg = messageFactory.userOffline(user.getUsername());
+            String displayOffline = formatForDisplay(offlineMsg);
+            broadcastToServer(
+                    "general",
+                    "SERVER_MSG:general:SYSTEM:SYSTEM:" + displayOffline
+            );
 
             LocalServer generalServer = localServers.get("general");
             if (generalServer != null && generalServer.isMember(userId)) {
                 generalServer.removeMember(userId);
+                serverDAO.removeMember("general", userId);
 
-                Message leaveMessage = MessageFactory.serverLeave(user.getUsername(), "general");
-                broadcastToServer("general",
-                        "SERVER_MSG:general:SYSTEM:SYSTEM:" + leaveMessage.getContent()
+                Message leaveMessage = messageFactory.serverLeave(user.getUsername(), "general");
+                String displayLeave = formatForDisplay(leaveMessage);
+                broadcastToServer(
+                        "general",
+                        "SERVER_MSG:general:SYSTEM:SYSTEM:" + displayLeave
                 );
             }
 
             notifyFriendsOnlineStatus(userId, false);
-            System.out.println("User.User disconnected: " + user.getUsername());
+            System.out.println("User disconnected: " + user.getUsername());
         }
     }
 
+    // -------------------------------------------------------------------------
+    // FRIENDS
+    // -------------------------------------------------------------------------
     public synchronized void sendFriendRequest(String senderId, String receiverId) {
-        User sender = users.get(senderId);
-        User receiver = users.get(receiverId);
+        User sender = loadUserIfExists(senderId);
+        User receiver = loadUserIfExists(receiverId);
 
         if (sender == null || receiver == null) {
-            sendToClient(senderId, "ERROR: User.User not found");
+            sendToClient(senderId, "ERROR: User not found");
             return;
         }
-        if (receiver.hasBlocked(senderId)) {
+        if (blockedDAO.isBlocked(receiverId, senderId)) {
             sendToClient(senderId, "ERROR: Cannot send friend request (you are blocked by this user)");
             return;
         }
 
-        Message friendRequest = MessageFactory.friendRequest(senderId, receiverId);
+        Message friendRequest = messageFactory.friendRequest(senderId, receiverId);
+        // Optional: persist pending request with FriendDAO if you have that
 
+        // We still send a structured protocol message; UI can decide what to show
         sendToClient(receiverId, "FRIEND_REQUEST:" + senderId + ":" + sender.getUsername());
         System.out.println("Friend request: " + senderId + " -> " + receiverId);
     }
 
     public synchronized void acceptFriendRequest(String userId, String friendId) {
-        User user = users.get(userId);
-        User friend = users.get(friendId);
+        User user = loadUserIfExists(userId);
+        User friend = loadUserIfExists(friendId);
 
         if (user == null || friend == null) {
-            sendToClient(userId, "ERROR: User.User not found");
+            sendToClient(userId, "ERROR: User not found");
             return;
         }
 
+        // In-memory
         user.addFriend(friendId);
         friend.addFriend(userId);
 
-        appendFriendshipToFile(userId, friendId);
-        appendFriendshipToFile(friendId, userId);
+        // DB (two-way)
+        friendDAO.addFriendship(userId, friendId);
+        friendDAO.addFriendship(friendId, userId);
 
         sendToClient(userId, "FRIEND_ADDED:" + friendId + ":" + friend.getUsername());
         sendToClient(friendId, "FRIEND_ADDED:" + userId + ":" + user.getUsername());
@@ -161,177 +231,143 @@ public class ChatServer {
         System.out.println("Friends added: " + userId + " <-> " + friendId);
     }
 
+    public synchronized List<String> getOnlineFriends(String userId) {
+        List<String> result = new ArrayList<>();
+        List<String> friendIds = friendDAO.getFriends(userId);
+
+        for (String fid : friendIds) {
+            User friend = users.get(fid);
+            if (friend != null && friend.isOnline()) {
+                result.add(fid + ":" + friend.getUsername());
+            }
+        }
+        return result;
+    }
+
+    // -------------------------------------------------------------------------
+    // DIRECT MESSAGES
+    // -------------------------------------------------------------------------
     public synchronized void sendDirectMessage(String senderId, String receiverId, String content) {
-        User sender = users.get(senderId);
-        User receiver = users.get(receiverId);
+        User sender = loadUserIfExists(senderId);
+        User receiver = loadUserIfExists(receiverId);
 
         if (sender == null || receiver == null) {
-            sendToClient(senderId, "ERROR: User.User not found");
+            sendToClient(senderId, "ERROR: User not found");
             return;
         }
 
-        if (receiver.hasBlocked(senderId) || sender.hasBlocked(receiverId)) {
+        if (blockedDAO.isBlocked(receiverId, senderId) || blockedDAO.isBlocked(senderId, receiverId)) {
             sendToClient(senderId, "ERROR: Cannot send direct message (user is blocked)");
             return;
         }
 
-        if (!sender.isFriend(receiverId)) {
+        if (!friendDAO.areFriends(senderId, receiverId)) {
             sendToClient(senderId, "ERROR: Not friends with this user");
             return;
         }
 
-        Message message = MessageFactory.directMessage(senderId, receiverId, content);
+        Message message = messageFactory.directMessage(senderId, receiverId, content);
 
         String conversationId = getConversationId(senderId, receiverId);
+
+        // In-memory cache
         sender.addDirectMessage(conversationId, message);
         receiver.addDirectMessage(conversationId, message);
 
-        appendDmToFile(conversationId, message);
+        // Persist
+        dmDAO.saveMessage(
+                conversationId,
+                senderId,
+                receiverId,
+                content,
+                message.getTimestamp()
+        );
 
-        sendToClient(receiverId, "DM:" + senderId + ":" + sender.getUsername() + ":" + content);
-        sendToClient(senderId, "DM_DELIVERED:" + receiverId + ":" + receiver.getUsername() + ":" + content);
+        // Use decorators: [time] sender: msg
+        String display = formatForDisplay(message);
+
+        sendToClient(receiverId, "DM:" + senderId + ":" + sender.getUsername() + ":" + display);
+        sendToClient(senderId, "DM_DELIVERED:" + receiverId + ":" + receiver.getUsername() + ":" + display);
 
         System.out.println("DM: " + senderId + " -> " + receiverId + ": " + content);
     }
 
-    public synchronized List<String> getOnlineFriends(String userId) {
-        User user = users.get(userId);
-        if (user == null) return new ArrayList<>();
+    public synchronized List<Message> getConversationHistory(String userId, String friendId) {
+        List<Message> result = new ArrayList<>();
 
-        List<String> onlineFriends = new ArrayList<>();
-        for (String friendId : user.getFriendIds()) {
-            User friend = users.get(friendId);
-            if (friend != null && friend.isOnline()) {
-                onlineFriends.add(friendId + ":" + friend.getUsername());
+
+        // DB
+        List<Message> dbMessages = dmDAO.getMessages(userId, friendId);
+        for (Message m : dbMessages) {
+            if (!result.contains(m)) { // may want better equals
+                result.add(m);
             }
         }
-        return onlineFriends;
+
+        // Sort by time
+        result.sort(Comparator.comparing(Message::getTimestamp));
+
+        return result;
     }
 
+    // -------------------------------------------------------------------------
+    // BLOCKING
+    // -------------------------------------------------------------------------
     public synchronized void blockUser(String userId, String blockedId) {
-        User user = users.get(userId);
-        User target = users.get(blockedId);
+        User user = loadUserIfExists(userId);
+        User target = loadUserIfExists(blockedId);
 
         if (user == null || target == null) {
-            sendToClient(userId, "ERROR: User.User not found");
+            sendToClient(userId, "ERROR: User not found");
             return;
         }
 
         user.blockUser(blockedId);
-        appendBlockedToFile(userId, blockedId);
+        blockedDAO.blockUser(userId, blockedId);
+
         sendToClient(userId, "BLOCKED:" + blockedId + ":" + target.getUsername());
     }
 
     public synchronized void unblockUser(String userId, String blockedId) {
-        User user = users.get(userId);
-        User target = users.get(blockedId);
+        User user = loadUserIfExists(userId);
+        User target = loadUserIfExists(blockedId);
 
         if (user == null || target == null) {
-            sendToClient(userId, "ERROR: User.User not found");
+            sendToClient(userId, "ERROR: User not found");
             return;
         }
 
         user.unblockUser(blockedId);
-        rewriteBlockedFileFromMemory();
+        blockedDAO.unblockUser(userId, blockedId);
 
         sendToClient(userId, "UNBLOCKED:" + blockedId + ":" + target.getUsername());
     }
 
     public synchronized List<String> getBlockedUsers(String userId) {
-        User user = users.get(userId);
         List<String> result = new ArrayList<>();
-        if (user == null) {
-            return result;
-        }
-        for (String blockedId : user.getBlockedUserIds()) {
-            User blockedUser = users.get(blockedId);
-            if (blockedUser != null) {
-                result.add(blockedId + ":" + blockedUser.getUsername());
+        List<String> blockedIds = blockedDAO.getBlockedUsers(userId);
+
+        for (String bid : blockedIds) {
+            db.model.DbUser dbUser = userDAO.getUserById(bid);
+            if (dbUser != null) {
+                result.add(bid + ":" + dbUser.username());
             }
         }
         return result;
     }
 
-    private void notifyFriendsOnlineStatus(String userId, boolean online) {
-        User user = users.get(userId);
-        if (user == null) return;
-
-        String status = online ? "ONLINE" : "OFFLINE";
-        for (String friendId : user.getFriendIds()) {
-            sendToClient(friendId, "STATUS:" + userId + ":" + user.getUsername() + ":" + status);
-        }
-    }
-
-    private void sendToClient(String userId, String message) {
-        ClientHandler handler = onlineClients.get(userId);
-        if (handler != null) {
-            handler.sendMessage(message);
-        }
-    }
-
-    private String getConversationId(String userId1, String userId2) {
-        return userId1.compareTo(userId2) < 0
-                ? userId1 + "_" + userId2
-                : userId2 + "_" + userId1;
-    }
-
-    public User getUser(String userId) {
-        return users.get(userId);
-    }
-
-    public synchronized List<Message> getConversationHistory(String userId, String friendId) {
-        List<Message> result = new ArrayList<>();
-        String conversationId = getConversationId(userId, friendId);
-
-        User user = users.get(userId);
-        if (user != null) {
-            result.addAll(user.getDirectMessages(conversationId));
-        }
-
-        if (!result.isEmpty()) {
-            return result;
-        }
-
-        File dmDir = new File(DM_DIR);
-        if (!dmDir.exists()) {
-            return result;
-        }
-
-        File file = new File(dmDir, conversationId + ".log");
-        if (!file.exists()) {
-            return result;
-        }
-
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split("\\|", 5);
-                if (parts.length >= 4) {
-                    String sender   = parts[1];
-                    String receiver = parts[2];
-                    String content  = parts[3];
-
-                    Message msg = new Message(
-                            UUID.randomUUID().toString(),
-                            sender,
-                            receiver,
-                            content,
-                            Message.MessageType.DIRECT_MESSAGE
-                    );
-                    result.add(msg);
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to load DM history: " + e.getMessage());
-        }
-
-        return result;
-    }
-
+    // -------------------------------------------------------------------------
+    // SERVERS / CHANNELS
+    // -------------------------------------------------------------------------
     public synchronized void createLocalServer(String serverId, String serverName, String ownerId) {
         if (!localServers.containsKey(serverId)) {
+            serverDAO.createServer(serverId, serverName, ownerId);
+            serverDAO.addMember(serverId, ownerId);
+
             LocalServer server = new LocalServer(serverId, serverName, ownerId);
+            server.addMember(ownerId);
             localServers.put(serverId, server);
+
             sendToClient(ownerId, "SERVER_CREATED:" + serverId + ":" + serverName);
 
             for (String uid : onlineClients.keySet()) {
@@ -348,7 +384,7 @@ public class ChatServer {
 
     public synchronized void joinLocalServer(String userId, String serverId) {
         LocalServer server = localServers.get(serverId);
-        User user = users.get(userId);
+        User user = loadUserIfExists(userId);
 
         if (server == null) {
             sendToClient(userId, "ERROR: Server not found");
@@ -356,17 +392,21 @@ public class ChatServer {
         }
 
         if (user == null) {
+            sendToClient(userId, "ERROR: User not found");
             return;
         }
 
         server.addMember(userId);
+        serverDAO.addMember(serverId, userId);
 
         sendToClient(userId, "SERVER_JOINED:" + serverId + ":" + server.getServerName());
 
-        Message joinMessage = MessageFactory.serverJoin(user.getUsername(), serverId);
+        Message joinMessage = messageFactory.serverJoin(user.getUsername(), serverId);
+        String displayJoin = formatForDisplay(joinMessage);
 
-        broadcastToServer(serverId,
-                "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + joinMessage.getContent()
+        broadcastToServer(
+                serverId,
+                "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + displayJoin
         );
 
         System.out.println("User " + userId + " joined server: " + serverId);
@@ -374,7 +414,7 @@ public class ChatServer {
 
     public synchronized void leaveLocalServer(String userId, String serverId) {
         LocalServer server = localServers.get(serverId);
-        User user = users.get(userId);
+        User user = loadUserIfExists(userId);
 
         if (server == null || user == null) {
             return;
@@ -386,12 +426,15 @@ public class ChatServer {
         }
 
         server.removeMember(userId);
+        serverDAO.removeMember(serverId, userId);
         sendToClient(userId, "SERVER_LEFT:" + serverId);
 
-        Message leaveMessage = MessageFactory.serverLeave(user.getUsername(), serverId);
+        Message leaveMessage = messageFactory.serverLeave(user.getUsername(), serverId);
+        String displayLeave = formatForDisplay(leaveMessage);
 
-        broadcastToServer(serverId,
-                "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + leaveMessage.getContent()
+        broadcastToServer(
+                serverId,
+                "SERVER_MSG:" + serverId + ":SYSTEM:SYSTEM:" + displayLeave
         );
 
         System.out.println("User " + userId + " left server: " + serverId);
@@ -399,7 +442,7 @@ public class ChatServer {
 
     public synchronized void sendServerMessage(String userId, String serverId, String content) {
         LocalServer server = localServers.get(serverId);
-        User user = users.get(userId);
+        User user = loadUserIfExists(userId);
 
         if (server == null) {
             sendToClient(userId, "ERROR: Server not found");
@@ -407,6 +450,7 @@ public class ChatServer {
         }
 
         if (user == null) {
+            sendToClient(userId, "ERROR: User not found");
             return;
         }
 
@@ -415,40 +459,47 @@ public class ChatServer {
             return;
         }
 
-        Message message = MessageFactory.serverMessage(userId, serverId, content);
+        Message message = messageFactory.serverMessage(userId, serverId, content);
 
         server.addMessage(message);
-        broadcastToServer(serverId,
-                "SERVER_MSG:" + serverId + ":" + userId + ":" + user.getUsername() + ":" + content
+        serverMessageDAO.saveMessage(
+                serverId,
+                userId,
+                content,
+                message.getTimestamp()
+        );
+
+        // [time] sender: msg
+        String display = formatForDisplay(message);
+
+        broadcastToServer(
+                serverId,
+                "SERVER_MSG:" + serverId + ":" + userId + ":" + user.getUsername() + ":" + display
         );
 
         System.out.println("Server message in " + serverId + " from " + userId + ": " + content);
     }
 
     public synchronized List<String> listLocalServers() {
-        List<String> serverList = new ArrayList<>();
-        for (LocalServer server : localServers.values()) {
-            serverList.add(server.getServerId() + ":" + server.getServerName() + ":" + server.getMemberCount());
-        }
-        return serverList;
+        return serverDAO.listServers();  // e.g. "id:name:memberCount"
     }
 
     public synchronized List<String> getServerMembers(String serverId) {
-        LocalServer server = localServers.get(serverId);
-        if (server == null) {
-            return new ArrayList<>();
-        }
+        List<String> memberIds = serverDAO.getMembers(serverId);
+        List<String> result = new ArrayList<>();
 
-        List<String> memberList = new ArrayList<>();
-        for (String memberId : server.getMembers()) {
-            User member = users.get(memberId);
-            if (member != null) {
-                memberList.add(memberId + ":" + member.getUsername());
+        for (String mid : memberIds) {
+            db.model.DbUser dbUser = userDAO.getUserById(mid);
+            if (dbUser != null) {
+                result.add(mid + ":" + dbUser.username());
             }
         }
-        return memberList;
+        return result;
     }
 
+    // -------------------------------------------------------------------------
+    // HELPER METHODS
+    // -------------------------------------------------------------------------
     private void broadcastToServer(String serverId, String message) {
         LocalServer server = localServers.get(serverId);
         if (server == null) {
@@ -460,210 +511,89 @@ public class ChatServer {
         }
     }
 
-    public void shutdown() {
-        try {
-            threadPool.shutdown();
-            if (serverSocket != null) serverSocket.close();
-        } catch (IOException e) {
-            System.err.println("Error shutting down server: " + e.getMessage());
+    private void notifyFriendsOnlineStatus(String userId, boolean online) {
+        String status = online ? "ONLINE" : "OFFLINE";
+        List<String> friends = friendDAO.getFriends(userId);
+        User user = users.get(userId);
+        String username = (user != null) ? user.getUsername() : userId;
+
+        for (String friendId : friends) {
+            sendToClient(friendId, "STATUS:" + userId + ":" + username + ":" + status);
         }
     }
 
-    private void loadUsersFromFile() {
-        File file = new File(USERS_FILE);
-        if (!file.exists()) {
-            return;
-        }
-
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            String line;
-            int count = 0;
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split(",", 3);
-                if (parts.length == 3) {
-                    String id    = parts[0];
-                    String name  = parts[1];
-                    String email = parts[2];
-
-                    User user = new UserBuilder()
-                            .setUserId(id)
-                            .setUsername(name)
-                            .setEmail(email)
-                            .setOnline(false)
-                            .build();
-                    users.put(id, user);
-                    count++;
-                }
-            }
-            System.out.println("Loaded " + count + " users from disk.");
-        } catch (IOException e) {
-            System.err.println("Failed to load users from file: " + e.getMessage());
+    private void sendToClient(String userId, String message) {
+        ClientHandler handler = onlineClients.get(userId);
+        if (handler != null) {
+            handler.sendMessage(message);
         }
     }
 
-    private void appendUserToFile(User user) {
-        try {
-            File dataDir = new File(DATA_DIR);
-            if (!dataDir.exists()) {
-                dataDir.mkdirs();
-            }
-
-            try (FileWriter fw = new FileWriter(USERS_FILE, true);
-                 BufferedWriter bw = new BufferedWriter(fw);
-                 PrintWriter out = new PrintWriter(bw)) {
-
-                out.println(user.getUserId() + "," +
-                        user.getUsername() + "," +
-                        user.getEmail());
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to persist user: " + e.getMessage());
-        }
+    private String getConversationId(String userId1, String userId2) {
+        return userId1.compareTo(userId2) < 0
+                ? userId1 + "_" + userId2
+                : userId2 + "_" + userId1;
     }
 
-    private void appendDmToFile(String conversationId, Message message) {
-        try {
-            File dmDir = new File(DM_DIR);
-            if (!dmDir.exists()) {
-                dmDir.mkdirs();
-            }
+    private User loadUserIfExists(String userId) {
+        User u = users.get(userId);
+        if (u != null) return u;
 
-            File file = new File(dmDir, conversationId + ".log");
-            try (FileWriter fw = new FileWriter(file, true);
-                 BufferedWriter bw = new BufferedWriter(fw);
-                 PrintWriter out = new PrintWriter(bw)) {
+        db.model.DbUser dbUser = userDAO.getUserById(userId);
+        if (dbUser == null) return null;
 
-                out.println(message.getFormattedTimestamp() + "|" +
-                        message.getSenderId() + "|" +
-                        message.getReceiverId() + "|" +
-                        message.getContent().replace("\n", " ") + "|" +
-                        message.getType().name());
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to persist DM: " + e.getMessage());
-        }
+        u = new UserBuilder()
+                .setUserId(dbUser.id())
+                .setUsername(dbUser.username())
+                .setEmail(dbUser.email())
+                .setOnline(false)
+                .build();
+        users.put(userId, u);
+        return u;
     }
 
-    private void appendFriendshipToFile(String userId, String friendId) {
-        try {
-            File dataDir = new File(DATA_DIR);
-            if (!dataDir.exists()) {
-                dataDir.mkdirs();
-            }
+    /**
+     * Decorator pipeline:
+     * - If sender == "SYSTEM": [time] msg
+     * - Else (DM + server msg): [time] sender: msg
+     */
+    private String formatForDisplay(Message message) {
+        MessageComponent component = new BaseMessage(message);
 
-            try (FileWriter fw = new FileWriter(FRIENDS_FILE, true);
-                 BufferedWriter bw = new BufferedWriter(fw);
-                 PrintWriter out = new PrintWriter(bw)) {
+        boolean includeSender =
+                !"SYSTEM".equals(message.getSenderId()) &&
+                        (message.getType() == Message.MessageType.DIRECT_MESSAGE
+                                || message.getType() == Message.MessageType.SERVER_MESSAGE);
 
-                out.println(userId + "," + friendId);
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to persist friendship: " + e.getMessage());
+        if (includeSender) {
+            component = new SenderNameDecorator(component, message);
         }
+
+        component = new TimestampDecorator(component, message);
+
+        return component.getContent();
     }
 
-    private void loadFriendsFromFile() {
-        File file = new File(FRIENDS_FILE);
-        if (!file.exists()) {
-            return;
-        }
-
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            String line;
-            int count = 0;
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split(",", 2);
-                if (parts.length == 2) {
-                    String userId   = parts[0];
-                    String friendId = parts[1];
-
-                    User user = users.get(userId);
-                    if (user != null) {
-                        user.addFriend(friendId);
-                        count++;
-                    }
-                }
-            }
-            System.out.println("Loaded " + count + " friendship links from disk.");
-        } catch (IOException e) {
-            System.err.println("Failed to load friendships: " + e.getMessage());
-        }
+    public String resolveUsername(String userId) {
+        db.model.DbUser dbUser = userDAO.getUserById(userId);
+        return (dbUser != null) ? dbUser.username() : userId;
     }
 
-    private void appendBlockedToFile(String userId, String blockedId) {
-        try {
-            File dataDir = new File(DATA_DIR);
-            if (!dataDir.exists()) {
-                dataDir.mkdirs();
-            }
 
-            try (FileWriter fw = new FileWriter(BLOCKED_FILE, true);
-                 BufferedWriter bw = new BufferedWriter(fw);
-                 PrintWriter out = new PrintWriter(bw)) {
-
-                out.println(userId + "," + blockedId);
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to persist blocked user: " + e.getMessage());
-        }
-    }
-
-    private void loadBlockedFromFile() {
-        File file = new File(BLOCKED_FILE);
-        if (!file.exists()) {
-            return;
-        }
-
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            String line;
-            int count = 0;
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split(",", 2);
-                if (parts.length == 2) {
-                    String userId    = parts[0];
-                    String blockedId = parts[1];
-
-                    User user = users.get(userId);
-                    if (user != null) {
-                        user.blockUser(blockedId);
-                        count++;
-                    }
-                }
-            }
-            System.out.println("Loaded " + count + " block relationships from disk.");
-        } catch (IOException e) {
-            System.err.println("Failed to load blocked users: " + e.getMessage());
-        }
-    }
-
-    private void rewriteBlockedFileFromMemory() {
-        try {
-            File dataDir = new File(DATA_DIR);
-            if (!dataDir.exists()) {
-                dataDir.mkdirs();
-            }
-
-            try (FileWriter fw = new FileWriter(BLOCKED_FILE, false);
-                 BufferedWriter bw = new BufferedWriter(fw);
-                 PrintWriter out = new PrintWriter(bw)) {
-
-                for (User u : users.values()) {
-                    for (String blockedId : u.getBlockedUserIds()) {
-                        out.println(u.getUserId() + "," + blockedId);
-                    }
-                }
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to rewrite blocked file: " + e.getMessage());
-        }
-    }
-
+    // -------------------------------------------------------------------------
+    // MAIN
+    // -------------------------------------------------------------------------
     public static void main(String[] args) {
+        db.SchemaManager.initialize();
         ChatServer server = new ChatServer();
         server.start();
     }
 }
 
+
+// ============================================================================
+// ClientHandler (unchanged except using ChatServer APIs)
+// ============================================================================
 class ClientHandler implements Runnable {
     private final Socket socket;
     private final ChatServer server;
@@ -791,20 +721,27 @@ class ClientHandler implements Runnable {
                 if (parts.length >= 2) {
                     String friendId = parts[1];
                     List<Message> history = server.getConversationHistory(userId, friendId);
+
                     StringBuilder payload = new StringBuilder();
+
                     for (Message m : history) {
-                        if (payload.length() > 0) {
-                            payload.append("|");
-                        }
-                        payload.append(m.getFormattedTimestamp())
+                        String formattedTime = m.getFormattedTimestamp();
+                        String senderName = server.resolveUsername(m.getSenderId());
+                        String content = m.getContent();
+
+                        if (payload.length() > 0) payload.append("|");
+
+                        payload.append(formattedTime)
                                 .append("~")
-                                .append(m.getSenderId())
+                                .append(senderName)
                                 .append("~")
-                                .append(m.getContent());
+                                .append(content);
                     }
+
                     sendMessage("HISTORY:" + friendId + ":" + payload);
                 }
                 break;
+
         }
     }
 
