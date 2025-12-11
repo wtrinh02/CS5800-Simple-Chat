@@ -1,22 +1,15 @@
 package Message.Decorator;
-import Message.Message;
 
-public abstract class MessageDecorator extends Message {
-    protected final Message wrapped;
+public abstract class MessageDecorator implements MessageComponent {
 
-    public MessageDecorator(Message wrapped) {
-        super(
-                wrapped.getMessageId(),
-                wrapped.getSenderId(),
-                wrapped.getReceiverId(),
-                wrapped.getContent(),
-                wrapped.getType()
-        );
-        this.wrapped = wrapped;
+    protected final MessageComponent wrappee;
+
+    public MessageDecorator(MessageComponent wrappee) {
+        this.wrappee = wrappee;
     }
 
     @Override
-    public String toDisplayString() {
-        return wrapped.toDisplayString();
+    public String getContent() {
+        return wrappee.getContent();
     }
 }
