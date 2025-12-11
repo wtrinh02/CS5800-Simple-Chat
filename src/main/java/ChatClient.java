@@ -17,6 +17,9 @@ public class ChatClient {
     private Thread listenerThread;
     private String lastPrintedServer = null;
 
+    // NEW: authentication flag
+    private boolean authenticated = false;
+
     // ANSI color codes for nicer CLI output
     private static final String RESET  = "\u001B[0m";
     private static final String RED    = "\u001B[31m";
@@ -42,24 +45,30 @@ public class ChatClient {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
 
-            // Register with server
-            sendCommand("REGISTER:" + userId + ":" + username + ":user@example.com");
+            // *** NO AUTO-REGISTER HERE ANYMORE ***
+            System.out.println(GREEN + "Connected to chat server " + serverHost + ":" + SERVER_PORT + RESET);
+            System.out.println(YELLOW + "You must login or register before using chat commands." + RESET);
+            System.out.println("Use:");
+            System.out.println("  login <password>");
+            System.out.println("  register <password>");
 
             // Listener thread
             listenerThread = new Thread(this::listenForMessages);
             listenerThread.setDaemon(true);
             listenerThread.start();
 
-            System.out.println("Connected to chat server " + serverHost + ":" + SERVER_PORT + " as " + username);
-
         } catch (IOException e) {
-            System.err.println("Connection error: " + e.getMessage());
+            System.err.println(RED + "Connection error: " + e.getMessage() + RESET);
         }
     }
 
     private void printPrompt() {
         String serverLabel = (currentServer != null) ? currentServer : "no-server";
-        System.out.print(username + "@" + serverLabel + "> ");
+        if (!authenticated) {
+            System.out.print(username + "@auth> ");
+        } else {
+            System.out.print(username + "@" + serverLabel + "> ");
+        }
     }
 
     private void clearCurrentLine() {
@@ -89,6 +98,14 @@ public class ChatClient {
         System.out.println("=================================\n");
     }
 
+    private void printAuthHelp() {
+        System.out.println("\n========= AUTH COMMANDS =========");
+        System.out.println("login <password>       - Log into existing account for this userId");
+        System.out.println("register <password>    - Create a new account for this userId & username");
+        System.out.println("help                   - Show this auth help");
+        System.out.println("=================================\n");
+    }
+
     private void listenForMessages() {
         try {
             String message;
@@ -97,7 +114,7 @@ public class ChatClient {
             }
         } catch (IOException e) {
             if (running) {
-                System.err.println("Connection lost: " + e.getMessage());
+                System.err.println(RED + "Connection lost: " + e.getMessage() + RESET);
             }
         }
     }
@@ -106,6 +123,62 @@ public class ChatClient {
         String[] parts = message.split(":", 2); // Split into type and data
         String type = parts[0];
 
+        // ---------- AUTH RESPONSES FIRST ----------
+        if ("REGISTER_OK".equals(type)) {
+            // Format: REGISTER_OK:<userId>:<username>
+            String[] p = message.split(":");
+            if (p.length >= 3) {
+                this.userId = p[1];
+                this.username = p[2];
+            }
+            authenticated = true;
+            System.out.println(GREEN + "\n[AUTH] Registration successful! Logged in as "
+                    + username + " (ID: " + userId + ")" + RESET);
+            printHelp();
+            printPrompt();
+            return;
+        }
+
+        if ("REGISTER_FAILED".equals(type)) {
+            String reason = (parts.length >= 2) ? parts[1] : "Unknown reason";
+            System.out.println(RED + "\n[AUTH] Registration failed: " + reason + RESET);
+            printAuthHelp();
+            printPrompt();
+            return;
+        }
+
+        if ("LOGIN_OK".equals(type)) {
+            // Format: LOGIN_OK:<userId>:<username>
+            String[] p = message.split(":");
+            if (p.length >= 3) {
+                this.userId = p[1];
+                this.username = p[2];
+            }
+            authenticated = true;
+            System.out.println(GREEN + "\n[AUTH] Login successful! Welcome " + username
+                    + " (ID: " + userId + ")" + RESET);
+            printHelp();
+            printPrompt();
+            return;
+        }
+
+        if ("LOGIN_FAILED".equals(type)) {
+            String reason = (parts.length >= 2) ? parts[1] : "Unknown reason";
+            System.out.println(RED + "\n[AUTH] Login failed: " + reason + RESET);
+            printAuthHelp();
+            printPrompt();
+            return;
+        }
+
+        // If not authenticated yet, ignore other traffic (except maybe generic ERROR)
+        if (!authenticated && !"ERROR".equals(type)) {
+            System.out.println(YELLOW + "\n[AUTH] You must login or register first." + RESET);
+            printAuthHelp();
+            printPrompt();
+            return;
+        }
+
+        // ---------- NORMAL CHAT MESSAGES ----------
         switch (type) {
             case "REGISTERED":
                 if (parts.length >= 2) {
@@ -133,7 +206,6 @@ public class ChatClient {
             }
 
             case "DM": {
-                // Server now sends DISPLAY text already decorated (time + sender if needed)
                 // Format: DM:<senderId>:<senderName>:<displayString>
                 String[] dmParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (dmParts.length >= 3) {
@@ -230,14 +302,12 @@ public class ChatClient {
                     }
 
                     if (senderId.equals("SYSTEM")) {
-                        // System messages: server tag + decorated content
                         if (serverId.equals(currentServer)) {
                             System.out.println(CYAN + "[* " + serverId + " | SERVER] " + display + RESET);
                         } else {
                             System.out.println(CYAN + "[" + serverId + " | SERVER] " + display + RESET);
                         }
                     } else {
-                        // Normal messages: use decorated content (already has time/sender as per decorators)
                         if (serverId.equals(currentServer)) {
                             System.out.println(CYAN + "[* " + serverId + "] " + display + RESET);
                         } else {
@@ -454,7 +524,7 @@ public class ChatClient {
     public void startCLI() {
         Scanner scanner = new Scanner(System.in);
 
-        printHelp();
+        printAuthHelp();
 
         while (running) {
             printPrompt();
@@ -467,6 +537,48 @@ public class ChatClient {
             String[] parts = input.split("\\s+", 3);
             String command = parts[0].toLowerCase();
 
+            // ---------- AUTH PHASE ----------
+            if (!authenticated) {
+                switch (command) {
+                    case "register":
+                        if (parts.length >= 2) {
+                            String password = parts[1];
+                            sendCommand("REGISTER:" + userId + ":" + username + ":" + password);
+                            System.out.println("Attempting registration for " + username + " (ID: " + userId + ")...");
+                        } else {
+                            System.out.println("Usage: register <password>");
+                        }
+                        continue;
+
+                    case "login":
+                        if (parts.length >= 2) {
+                            String password = parts[1];
+                            sendCommand("LOGIN:" + userId + ":" + password);
+                            System.out.println("Attempting login for " + username + " (ID: " + userId + ")...");
+                        } else {
+                            System.out.println("Usage: login <password>");
+                        }
+                        continue;
+
+                    case "help":
+                        printAuthHelp();
+                        continue;
+
+                    case "quit":
+                    case "exit":
+                        disconnect();
+                        System.out.println("Exiting client...");
+                        System.exit(0);
+                        return;
+
+                    default:
+                        System.out.println("You must login or register first.");
+                        System.out.println("Use: login <password>  or  register <password>");
+                        continue;
+                }
+            }
+
+            // ---------- NORMAL COMMANDS AFTER AUTH ----------
             switch (command) {
                 case "add":
                     if (parts.length >= 2) {

@@ -83,15 +83,40 @@ public class ChatServer {
     }
 
     // -------------------------------------------------------------------------
+    // PASSWORD / AUTH HELPERS
+    // -------------------------------------------------------------------------
+    // Very simple "hash" (for class project). In real life, use BCrypt/Argon2.
+    private String hashPassword(String rawPassword) {
+        // For now, just store as-is (plain text) to keep it simple.
+        // If you want, you can change this to a real hash later.
+        return rawPassword;
+    }
+
+    public boolean userExists(String userId) {
+        return userDAO.exists(userId);
+    }
+
+    public boolean isPasswordValid(String userId, String rawPassword) {
+        String stored = userDAO.getPasswordHash(userId);
+        if (stored == null) return false;
+        return stored.equals(hashPassword(rawPassword));
+    }
+
+    // -------------------------------------------------------------------------
     // USERS
     // -------------------------------------------------------------------------
+
+    // Legacy overload (used by tests / older code)
     public synchronized void registerUser(String userId, String username, String email) {
-        // 1. Persist in DB
+        registerUser(userId, username, email, "NO_PASSWORD_SET");
+    }
+
+    // New registration method with password
+    public synchronized void registerUser(String userId, String username, String email, String rawPassword) {
         if (!userDAO.exists(userId)) {
-            userDAO.createUser(userId, username, email);
+            userDAO.createUser(userId, username, email, hashPassword(rawPassword));
         }
 
-        // 2. In-memory
         if (!users.containsKey(userId)) {
             User user = new UserBuilder()
                     .setUserId(userId)
@@ -201,9 +226,8 @@ public class ChatServer {
         }
 
         Message friendRequest = messageFactory.friendRequest(senderId, receiverId);
-        // Optional: persist pending request with FriendDAO if you have that
+        // Optional: store pending request via DAO
 
-        // We still send a structured protocol message; UI can decide what to show
         sendToClient(receiverId, "FRIEND_REQUEST:" + senderId + ":" + sender.getUsername());
         System.out.println("Friend request: " + senderId + " -> " + receiverId);
     }
@@ -283,7 +307,7 @@ public class ChatServer {
                 message.getTimestamp()
         );
 
-        // Use decorators: [time] sender: msg
+        // Use decorators: [time] senderName: msg
         String display = formatForDisplay(message);
 
         sendToClient(receiverId, "DM:" + senderId + ":" + sender.getUsername() + ":" + display);
@@ -295,18 +319,15 @@ public class ChatServer {
     public synchronized List<Message> getConversationHistory(String userId, String friendId) {
         List<Message> result = new ArrayList<>();
 
-
-        // DB
+        // Only DB (to avoid duplicates)
         List<Message> dbMessages = dmDAO.getMessages(userId, friendId);
         for (Message m : dbMessages) {
-            if (!result.contains(m)) { // may want better equals
+            if (!result.contains(m)) {
                 result.add(m);
             }
         }
 
-        // Sort by time
         result.sort(Comparator.comparing(Message::getTimestamp));
-
         return result;
     }
 
@@ -469,7 +490,7 @@ public class ChatServer {
                 message.getTimestamp()
         );
 
-        // [time] sender: msg
+        // [time] senderName: msg
         String display = formatForDisplay(message);
 
         broadcastToServer(
@@ -536,6 +557,8 @@ public class ChatServer {
     }
 
     private User loadUserIfExists(String userId) {
+        if (userId == null) return null;
+
         User u = users.get(userId);
         if (u != null) return u;
 
@@ -555,30 +578,52 @@ public class ChatServer {
     /**
      * Decorator pipeline:
      * - If sender == "SYSTEM": [time] msg
-     * - Else (DM + server msg): [time] sender: msg
+     * - Else (DM + server msg): [time] senderName: msg
+     *
+     * We rewrite a "display" message whose senderId = username,
+     * so decorators don't need ChatServer or DAOs.
      */
     private String formatForDisplay(Message message) {
-        MessageComponent component = new BaseMessage(message);
+        String senderId = message.getSenderId();
+        boolean isSystem = "SYSTEM".equals(senderId);
+
+        String senderLabel = senderId;
+        if (!isSystem) {
+            senderLabel = resolveUsername(senderId); // turn "u1" into "Alice"
+        }
+
+        // Build a "display" message with senderLabel instead of raw ID
+        Message displayMessage = new Message(
+                message.getId(),
+                senderLabel,
+                message.getReceiverId(),
+                message.getContent(),
+                message.getType(),
+                message.getTimestamp()
+        );
+
+        MessageComponent component = new BaseMessage(displayMessage);
 
         boolean includeSender =
-                !"SYSTEM".equals(message.getSenderId()) &&
+                !isSystem &&
                         (message.getType() == Message.MessageType.DIRECT_MESSAGE
                                 || message.getType() == Message.MessageType.SERVER_MESSAGE);
 
         if (includeSender) {
-            component = new SenderNameDecorator(component, message);
+            component = new SenderNameDecorator(component, displayMessage);
         }
 
-        component = new TimestampDecorator(component, message);
+        component = new TimestampDecorator(component, displayMessage);
 
         return component.getContent();
     }
 
+    // Used by history / name lookup
     public String resolveUsername(String userId) {
+        if (userId == null) return "UNKNOWN";
         db.model.DbUser dbUser = userDAO.getUserById(userId);
         return (dbUser != null) ? dbUser.username() : userId;
     }
-
 
     // -------------------------------------------------------------------------
     // MAIN
@@ -592,7 +637,7 @@ public class ChatServer {
 
 
 // ============================================================================
-// ClientHandler (unchanged except using ChatServer APIs)
+// ClientHandler
 // ============================================================================
 class ClientHandler implements Runnable {
     private final Socket socket;
@@ -609,7 +654,7 @@ class ClientHandler implements Runnable {
     @Override
     public void run() {
         try {
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
 
             String inputLine;
@@ -627,15 +672,56 @@ class ClientHandler implements Runnable {
         String[] parts = command.split(":", 4);
         String action = parts[0];
 
+        // Enforce auth: only REGISTER / LOGIN allowed without userId
+        if (!action.equals("REGISTER") && !action.equals("LOGIN") && userId == null) {
+            sendMessage("ERROR:NOT_LOGGED_IN");
+            return;
+        }
+
         switch (action) {
+
+            // -------------------------------------------------------------
+            // REGISTRATION: REGISTER:<userId>:<username>:<password>
+            // -------------------------------------------------------------
             case "REGISTER":
+                if (parts.length >= 4) {
+                    String newUserId = parts[1];
+                    String username  = parts[2];
+                    String password  = parts[3];
+
+                    if (server.userExists(newUserId)) {
+                        sendMessage("REGISTER_FAILED:USER_EXISTS");
+                    } else {
+                        server.registerUser(newUserId, username, "", password);
+                        this.userId = newUserId;
+                        sendMessage("REGISTER_OK:" + newUserId + ":" + username);
+                        server.connectUser(this.userId, this);
+                    }
+                } else {
+                    sendMessage("REGISTER_FAILED:BAD_FORMAT");
+                }
+                break;
+
+            // -------------------------------------------------------------
+            // LOGIN: LOGIN:<userId>:<password>
+            // -------------------------------------------------------------
+            case "LOGIN":
                 if (parts.length >= 3) {
-                    userId = parts[1];
-                    String username = parts[2];
-                    String email = parts.length > 3 ? parts[3] : "";
-                    server.registerUser(userId, username, email);
-                    server.connectUser(userId, this);
-                    sendMessage("REGISTERED:" + userId);
+                    String loginId  = parts[1];
+                    String password = parts[2];
+
+                    if (!server.userExists(loginId)) {
+                        sendMessage("LOGIN_FAILED:NO_SUCH_USER");
+                    } else if (!server.isPasswordValid(loginId, password)) {
+                        sendMessage("LOGIN_FAILED:BAD_PASSWORD");
+                    } else {
+                        this.userId = loginId;
+                        String username = server.resolveUsername(this.userId);
+                        sendMessage("LOGIN_OK:" + this.userId + ":" + username);
+                        server.connectUser(this.userId, this);
+                    }
+                } else {
+                    sendMessage("LOGIN_FAILED:BAD_FORMAT");
                 }
                 break;
 
@@ -664,7 +750,7 @@ class ClientHandler implements Runnable {
 
             case "CREATE_SERVER":
                 if (parts.length >= 3) {
-                    String serverId = parts[1];
+                    String serverId   = parts[1];
                     String serverName = parts[2];
                     server.createLocalServer(serverId, serverName, userId);
                 }
@@ -695,6 +781,7 @@ class ClientHandler implements Runnable {
 
             case "SERVER_MEMBERS":
                 if (parts.length >= 2) {
+                    List<Message> history = null;
                     List<String> members = server.getServerMembers(parts[1]);
                     sendMessage("MEMBERS:" + parts[1] + ":" + String.join(",", members));
                 }
@@ -726,8 +813,8 @@ class ClientHandler implements Runnable {
 
                     for (Message m : history) {
                         String formattedTime = m.getFormattedTimestamp();
-                        String senderName = server.resolveUsername(m.getSenderId());
-                        String content = m.getContent();
+                        String senderName    = server.resolveUsername(m.getSenderId());
+                        String content       = m.getContent();
 
                         if (payload.length() > 0) payload.append("|");
 
@@ -741,7 +828,6 @@ class ClientHandler implements Runnable {
                     sendMessage("HISTORY:" + friendId + ":" + payload);
                 }
                 break;
-
         }
     }
 

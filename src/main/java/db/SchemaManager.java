@@ -10,14 +10,17 @@ public class SchemaManager {
             Connection conn = Database.getInstance().getConnection();
             Statement stmt = conn.createStatement();
 
+
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
                     username TEXT NOT NULL,
                     email TEXT,
-                    online INTEGER DEFAULT 0
+                    password_hash TEXT NOT NULL,
+                    online INTEGER NOT NULL DEFAULT 0
                 );
             """);
+
 
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS friends (
