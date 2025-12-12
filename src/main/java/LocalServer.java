@@ -1,10 +1,8 @@
 import Message.Message;
-
 import java.util.*;
 
 public class LocalServer {
     private static final String SYSTEM_OWNER = "SYSTEM";
-
     private final String serverId;
     private final String serverName;
     private final String ownerId;
@@ -86,10 +84,10 @@ public class LocalServer {
     }
 
     public int getMemberCount() {
-            if (isSystemOwned()) {
-                return Math.max(0, members.size() - 1);
-            }
-            return members.size();
+        if (isSystemOwned()) {
+            return Math.max(0, members.size() - 1);
+        }
+        return members.size();
     }
 
     @Override

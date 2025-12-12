@@ -144,8 +144,6 @@ public class ChatClientTest {
         assertEquals(true, matchesExpected);
     }
 
-
-
     @Test
     void listLocalServersShouldSendListServersCommand() throws Exception {
         TestWriter writer = new TestWriter();

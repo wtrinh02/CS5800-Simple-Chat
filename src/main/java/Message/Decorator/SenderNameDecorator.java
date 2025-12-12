@@ -1,7 +1,6 @@
 package Message.Decorator;
 
 import Message.Message;
-
 import db.dao.UserDAO;
 
 public class SenderNameDecorator extends MessageDecorator {
@@ -21,9 +20,7 @@ public class SenderNameDecorator extends MessageDecorator {
 
 }
 
-
-
- class UsernameResolver {
+class UsernameResolver {
 
     private static final UserDAO userDAO = new UserDAO();
 
@@ -34,4 +31,3 @@ public class SenderNameDecorator extends MessageDecorator {
         return (dbUser != null) ? dbUser.username() : userId;
     }
 }
-

@@ -17,10 +17,8 @@ public class ChatClient {
     private Thread listenerThread;
     private String lastPrintedServer = null;
 
-    // NEW: authentication flag
     private boolean authenticated = false;
 
-    // ANSI color codes for nicer CLI output
     private static final String RESET  = "\u001B[0m";
     private static final String RED    = "\u001B[31m";
     private static final String GREEN  = "\u001B[32m";
@@ -45,14 +43,12 @@ public class ChatClient {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             out = new PrintWriter(socket.getOutputStream(), true);
 
-            // *** NO AUTO-REGISTER HERE ANYMORE ***
             System.out.println(GREEN + "Connected to chat server " + serverHost + ":" + SERVER_PORT + RESET);
             System.out.println(YELLOW + "You must login or register before using chat commands." + RESET);
             System.out.println("Use:");
             System.out.println("  login <password>");
             System.out.println("  register <password>");
 
-            // Listener thread
             listenerThread = new Thread(this::listenForMessages);
             listenerThread.setDaemon(true);
             listenerThread.start();
@@ -121,12 +117,11 @@ public class ChatClient {
     }
 
     private void handleServerMessage(String message) {
-        String[] parts = message.split(":", 2); // Split into type and data
+        String[] parts = message.split(":", 2);
         String type = parts[0];
 
-        // ---------- AUTH RESPONSES FIRST ----------
         if ("REGISTER_OK".equals(type)) {
-            // Format: REGISTER_OK:<userId>:<username>
+
             String[] p = message.split(":");
             if (p.length >= 3) {
                 this.userId = p[1];
@@ -149,7 +144,7 @@ public class ChatClient {
         }
 
         if ("LOGIN_OK".equals(type)) {
-            // Format: LOGIN_OK:<userId>:<username>
+
             String[] p = message.split(":");
             if (p.length >= 3) {
                 this.userId = p[1];
@@ -171,7 +166,6 @@ public class ChatClient {
             return;
         }
 
-        // If not authenticated yet, ignore other traffic (except maybe generic ERROR)
         if (!authenticated && !"ERROR".equals(type)) {
             System.out.println(YELLOW + "\n[AUTH] You must login or register first." + RESET);
             printAuthHelp();
@@ -179,7 +173,6 @@ public class ChatClient {
             return;
         }
 
-        // ---------- NORMAL CHAT MESSAGES ----------
         switch (type) {
             case "REGISTERED":
                 if (parts.length >= 2) {
@@ -200,17 +193,15 @@ public class ChatClient {
                 String[] faParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (faParts.length >= 2) {
                     System.out.println("\n[FRIEND ADDED] You are now friends with " + faParts[1] + " (ID: " + faParts[0] + ")");
-                    // Automatically show updated friends list
                     getOnlineFriends();
                 }
                 break;
             }
 
             case "DM": {
-                // Format: DM:<senderId>:<senderName>:<displayString>
                 String[] dmParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (dmParts.length >= 3) {
-                    String display = dmParts[2]; // already formatted by decorators
+                    String display = dmParts[2];
                     System.out.println("\n" + GREEN + "[DM] " + display + RESET);
                 }
                 break;
@@ -287,15 +278,13 @@ public class ChatClient {
                 break;
 
             case "SERVER_MSG": {
-                // Format from server:
-                // SERVER_MSG:<serverId>:<senderId>:<senderName>:<displayString>
                 String[] smParts = parts.length >= 2 ? parts[1].split(":", 4) : new String[0];
 
                 if (smParts.length >= 4) {
                     String serverId = smParts[0];
                     String senderId = smParts[1];
-                    String senderName = smParts[2]; // unused for formatting now
-                    String display = smParts[3];    // already decorated string
+                    String senderName = smParts[2];
+                    String display = smParts[3];
 
                     if (!serverId.equals(lastPrintedServer)) {
                         System.out.println("\n====== [" + serverId.toUpperCase() + "] ======");
@@ -326,7 +315,6 @@ public class ChatClient {
                     for (String server : servers) {
                         String[] serverParts = server.split(":");
                         if (serverParts.length >= 2) {
-                            // DB version only returns id:name, so handle 2 parts
                             if (serverParts.length == 2) {
                                 System.out.println("  - " + serverParts[1] + " (ID: " + serverParts[0] + ")");
                             } else if (serverParts.length >= 3) {
@@ -373,11 +361,10 @@ public class ChatClient {
             }
 
             case "DM_DELIVERED": {
-                // Format: DM_DELIVERED:<receiverId>:<receiverName>:<displayString>
                 String[] ddParts = parts.length >= 2 ? parts[1].split(":", 3) : new String[0];
                 if (ddParts.length >= 3) {
                     String receiverName = ddParts[1];
-                    String display = ddParts[2]; // already decorated
+                    String display = ddParts[2];
                     System.out.println("\n" + GREEN + "[DELIVERED] To " + receiverName + ": " + display + RESET);
                 }
                 break;
@@ -463,8 +450,6 @@ public class ChatClient {
         printPrompt();
     }
 
-    // ----------------- COMMAND WRAPPERS -----------------
-
     public void sendFriendRequest(String friendId) {
         sendCommand("FRIEND_REQUEST:" + friendId);
         System.out.println("Friend request sent to user: " + friendId);
@@ -539,8 +524,6 @@ public class ChatClient {
         }
     }
 
-    // ----------------- CLI LOOP -----------------
-
     public void startCLI() {
         Scanner scanner = new Scanner(System.in);
 
@@ -557,7 +540,6 @@ public class ChatClient {
             String[] parts = input.split("\\s+", 3);
             String command = parts[0].toLowerCase();
 
-            // ---------- AUTH PHASE ----------
             if (!authenticated) {
                 switch (command) {
                     case "register":
@@ -598,7 +580,6 @@ public class ChatClient {
                 }
             }
 
-            // ---------- NORMAL COMMANDS AFTER AUTH ----------
             switch (command) {
                 case "add":
                     if (parts.length >= 2) {

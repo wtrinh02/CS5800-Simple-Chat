@@ -1,7 +1,6 @@
 package User;
 
 import Message.Message;
-
 import java.util.*;
 
 public class UserBuilder {

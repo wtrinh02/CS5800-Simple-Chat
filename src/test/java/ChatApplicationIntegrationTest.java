@@ -38,8 +38,6 @@ public class ChatApplicationIntegrationTest {
         serverThread.interrupt();
     }
 
-
-
     @Test
     void sendingCommandWithoutLoginShouldReturnNotLoggedInError() throws Exception {
         RawClientWithoutAuth client = new RawClientWithoutAuth();

@@ -1,8 +1,7 @@
 package db.dao;
 
-import db.Database;
 import Message.Message;
-
+import db.Database;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,10 +11,10 @@ public class DMDAO {
 
     public void saveMessage(String conversationId, String senderId, String receiverId, String content, long timestamp) {
         String sql = """
-            INSERT INTO dm_messages 
-            (conversation_id, sender_id, receiver_id, content, timestamp)
-            VALUES (?, ?, ?, ?, ?)
-        """;
+    INSERT INTO dm_messages
+    (conversation_id, sender_id, receiver_id, content, timestamp)
+    VALUES (?, ?, ?, ?, ?)
+    """;
         try (PreparedStatement ps = Database.getInstance().getConnection().prepareStatement(sql)) {
             ps.setString(1, conversationId);
             ps.setString(2, senderId);
@@ -35,11 +34,11 @@ public class DMDAO {
                 friendId + "_" + userId;
 
         String sql = """
-            SELECT sender_id, receiver_id, content, timestamp
-            FROM dm_messages
-            WHERE conversation_id = ?
-            ORDER BY timestamp ASC
-        """;
+    SELECT sender_id, receiver_id, content, timestamp
+    FROM dm_messages
+    WHERE conversation_id = ?
+    ORDER BY timestamp ASC
+    """;
 
         try (PreparedStatement ps = Database.getInstance().getConnection().prepareStatement(sql)) {
             ps.setString(1, conv);
@@ -71,11 +70,11 @@ public class DMDAO {
                 : friendId + "_" + userId;
 
         String sql = """
-        SELECT sender_id, receiver_id, content, timestamp
-        FROM dm_messages
-        WHERE conversation_id = ?
-          AND content LIKE ?
-        ORDER BY timestamp ASC
+    SELECT sender_id, receiver_id, content, timestamp
+    FROM dm_messages
+    WHERE conversation_id = ?
+    AND content LIKE ?
+    ORDER BY timestamp ASC
     """;
 
         try (PreparedStatement ps = Database.getInstance().getConnection().prepareStatement(sql)) {

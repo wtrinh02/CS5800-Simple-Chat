@@ -3,27 +3,23 @@ import Message.Decorator.BaseMessage;
 import Message.Decorator.MessageComponent;
 import Message.Decorator.SenderNameDecorator;
 import Message.Decorator.TimestampDecorator;
-
-import User.State.*;
 import User.*;
+import User.State.*;
 import User.UserBuilder;
-
+import db.dao.BlockedDAO;
+import db.dao.DMDAO;
+import db.dao.FriendDAO;
+import db.dao.ServerDAO;
+import db.dao.ServerMessageDAO;
+import db.dao.UserDAO;
 import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
 
-import db.dao.UserDAO;
-import db.dao.FriendDAO;
-import db.dao.BlockedDAO;
-import db.dao.DMDAO;
-import db.dao.ServerDAO;
-import db.dao.ServerMessageDAO;
-
 public class ChatServer {
     private static final int PORT = 8888;
 
-    // --- DAOs (database layer) ---
     private final UserDAO userDAO = new UserDAO();
     private final FriendDAO friendDAO = new FriendDAO();
     private final BlockedDAO blockedDAO = new BlockedDAO();
@@ -31,10 +27,9 @@ public class ChatServer {
     private final ServerDAO serverDAO = new ServerDAO();
     private final ServerMessageDAO serverMessageDAO = new ServerMessageDAO();
 
-    // --- In-memory runtime layer ---
-    private final Map<String, User> users;                 // userId -> User
-    private final Map<String, ClientHandler> onlineClients;// userId -> connection
-    private final Map<String, LocalServer> localServers;   // serverId -> LocalServer
+    private final Map<String, User> users;
+    private final Map<String, ClientHandler> onlineClients;
+    private final Map<String, LocalServer> localServers;
     private final ExecutorService threadPool;
     private ServerSocket serverSocket;
     private MessageFactory messageFactory;
@@ -46,7 +41,6 @@ public class ChatServer {
         this.localServers = new ConcurrentHashMap<>();
         this.threadPool = Executors.newCachedThreadPool();
 
-        // Create default "general" server (DB + in-memory)
         if (!serverDAO.exists("general")) {
             serverDAO.createServer("general", "General", "SYSTEM");
         }
@@ -55,9 +49,6 @@ public class ChatServer {
         System.out.println("Default 'General' server created");
     }
 
-    // -------------------------------------------------------------------------
-    // SERVER LIFECYCLE
-    // -------------------------------------------------------------------------
     public void start() {
         try {
             serverSocket = new ServerSocket(PORT);
@@ -82,13 +73,8 @@ public class ChatServer {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // PASSWORD / AUTH HELPERS
-    // -------------------------------------------------------------------------
-    // Very simple "hash" (for class project). In real life, use BCrypt/Argon2.
     private String hashPassword(String rawPassword) {
-        // For now, just store as-is (plain text) to keep it simple.
-        // If you want, you can change this to a real hash later.
+
         return rawPassword;
     }
 
@@ -102,16 +88,10 @@ public class ChatServer {
         return stored.equals(hashPassword(rawPassword));
     }
 
-    // -------------------------------------------------------------------------
-    // USERS
-    // -------------------------------------------------------------------------
-
-    // Legacy overload (used by tests / older code)
     public synchronized void registerUser(String userId, String username, String email) {
         registerUser(userId, username, email, "NO_PASSWORD_SET");
     }
 
-    // New registration method with password
     public synchronized void registerUser(String userId, String username, String email, String rawPassword) {
         if (!userDAO.exists(userId)) {
             userDAO.createUser(userId, username, email, hashPassword(rawPassword));
@@ -132,7 +112,6 @@ public class ChatServer {
     public synchronized void connectUser(String userId, ClientHandler handler) {
         User user = users.get(userId);
 
-        // Load from DB if needed
         if (user == null) {
             db.model.DbUser dbUser = userDAO.getUserById(userId);
             if (dbUser == null) {
@@ -153,7 +132,6 @@ public class ChatServer {
         onlineClients.put(userId, handler);
         userDAO.setOnline(userId, true);
 
-        // System: user online (time msg)
         Message onlineMsg = messageFactory.userOnline(user.getUsername());
         String displayOnline = formatForDisplay(onlineMsg);
         broadcastToServer("general", "SERVER_MSG:general:SYSTEM:SYSTEM:" + displayOnline);
@@ -209,9 +187,6 @@ public class ChatServer {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // FRIENDS
-    // -------------------------------------------------------------------------
     public synchronized void sendFriendRequest(String senderId, String receiverId) {
         User sender = loadUserIfExists(senderId);
         User receiver = loadUserIfExists(receiverId);
@@ -226,7 +201,6 @@ public class ChatServer {
         }
 
         Message friendRequest = messageFactory.friendRequest(senderId, receiverId);
-        // Optional: store pending request via DAO
 
         sendToClient(receiverId, "FRIEND_REQUEST:" + senderId + ":" + sender.getUsername());
         System.out.println("Friend request: " + senderId + " -> " + receiverId);
@@ -241,11 +215,9 @@ public class ChatServer {
             return;
         }
 
-        // In-memory
         user.addFriend(friendId);
         friend.addFriend(userId);
 
-        // DB (two-way)
         friendDAO.addFriendship(userId, friendId);
         friendDAO.addFriendship(friendId, userId);
 
@@ -268,9 +240,6 @@ public class ChatServer {
         return result;
     }
 
-    // -------------------------------------------------------------------------
-    // DIRECT MESSAGES
-    // -------------------------------------------------------------------------
     public synchronized void sendDirectMessage(String senderId, String receiverId, String content) {
         User sender = loadUserIfExists(senderId);
         User receiver = loadUserIfExists(receiverId);
@@ -294,11 +263,9 @@ public class ChatServer {
 
         String conversationId = getConversationId(senderId, receiverId);
 
-        // In-memory cache
         sender.addDirectMessage(conversationId, message);
         receiver.addDirectMessage(conversationId, message);
 
-        // Persist
         dmDAO.saveMessage(
                 conversationId,
                 senderId,
@@ -307,7 +274,6 @@ public class ChatServer {
                 message.getTimestamp()
         );
 
-        // Use decorators: [time] senderName: msg
         String display = formatForDisplay(message);
 
         sendToClient(receiverId, "DM:" + senderId + ":" + sender.getUsername() + ":" + display);
@@ -319,11 +285,10 @@ public class ChatServer {
     public synchronized List<Message> getConversationHistory(String userId, String friendId) {
         List<Message> result = new ArrayList<>();
 
-        // Only DB (to avoid duplicates)
         List<Message> dbMessages = dmDAO.getMessages(userId, friendId);
-        for (Message m : dbMessages) {
-            if (!result.contains(m)) {
-                result.add(m);
+        for (Message message : dbMessages) {
+            if (!result.contains(message)) {
+                result.add(message);
             }
         }
 
@@ -331,9 +296,6 @@ public class ChatServer {
         return result;
     }
 
-    // -------------------------------------------------------------------------
-    // BLOCKING
-    // -------------------------------------------------------------------------
     public synchronized void blockUser(String userId, String blockedId) {
         User user = loadUserIfExists(userId);
         User target = loadUserIfExists(blockedId);
@@ -377,9 +339,6 @@ public class ChatServer {
         return result;
     }
 
-    // -------------------------------------------------------------------------
-    // SERVERS / CHANNELS
-    // -------------------------------------------------------------------------
     public synchronized void createLocalServer(String serverId, String serverName, String ownerId) {
         if (!localServers.containsKey(serverId)) {
             serverDAO.createServer(serverId, serverName, ownerId);
@@ -490,7 +449,6 @@ public class ChatServer {
                 message.getTimestamp()
         );
 
-        // [time] senderName: msg
         String display = formatForDisplay(message);
 
         broadcastToServer(
@@ -502,7 +460,7 @@ public class ChatServer {
     }
 
     public synchronized List<String> listLocalServers() {
-        return serverDAO.listServers();  // e.g. "id:name:memberCount"
+        return serverDAO.listServers();
     }
 
     public synchronized List<String> getServerMembers(String serverId) {
@@ -518,9 +476,6 @@ public class ChatServer {
         return result;
     }
 
-    // -------------------------------------------------------------------------
-    // HELPER METHODS
-    // -------------------------------------------------------------------------
     private void broadcastToServer(String serverId, String message) {
         LocalServer server = localServers.get(serverId);
         if (server == null) {
@@ -559,46 +514,35 @@ public class ChatServer {
     private User loadUserIfExists(String userId) {
         if (userId == null) return null;
 
-        User u = users.get(userId);
-        if (u != null) return u;
+        User user = users.get(userId);
+        if (user != null) return user;
 
         db.model.DbUser dbUser = userDAO.getUserById(userId);
         if (dbUser == null) return null;
 
-        u = new UserBuilder()
+        user = new UserBuilder()
                 .setUserId(dbUser.id())
                 .setUsername(dbUser.username())
                 .setEmail(dbUser.email())
                 .setOnline(false)
                 .build();
-        users.put(userId, u);
-        return u;
+        users.put(userId, user);
+        return user;
     }
 
-    // ChatServer.java
     public List<Message> searchDMs(String userId, String friendId, String keyword) {
         return dmDAO.searchMessages(userId, friendId, keyword);
     }
 
-
-    /**
-     * Decorator pipeline:
-     * - If sender == "SYSTEM": [time] msg
-     * - Else (DM + server msg): [time] senderName: msg
-     *
-     * We rewrite a "display" message whose senderId = username,
-     * so decorators don't need ChatServer or DAOs.
-     */
     private String formatForDisplay(Message message) {
         String senderId = message.getSenderId();
         boolean isSystem = "SYSTEM".equals(senderId);
 
         String senderLabel = senderId;
         if (!isSystem) {
-            senderLabel = resolveUsername(senderId); // turn "u1" into "Alice"
+            senderLabel = resolveUsername(senderId);
         }
 
-        // Build a "display" message with senderLabel instead of raw ID
         Message displayMessage = new Message(
                 message.getId(),
                 senderLabel,
@@ -624,16 +568,12 @@ public class ChatServer {
         return component.getContent();
     }
 
-    // Used by history / name lookup
     public String resolveUsername(String userId) {
         if (userId == null) return "UNKNOWN";
         db.model.DbUser dbUser = userDAO.getUserById(userId);
         return (dbUser != null) ? dbUser.username() : userId;
     }
 
-    // -------------------------------------------------------------------------
-    // MAIN
-    // -------------------------------------------------------------------------
     public static void main(String[] args) {
         db.SchemaManager.initialize();
         ChatServer server = new ChatServer();
@@ -641,10 +581,6 @@ public class ChatServer {
     }
 }
 
-
-// ============================================================================
-// ClientHandler
-// ============================================================================
 class ClientHandler implements Runnable {
     private final Socket socket;
     private final ChatServer server;
@@ -678,7 +614,6 @@ class ClientHandler implements Runnable {
         String[] parts = command.split(":", 4);
         String action = parts[0];
 
-        // Enforce auth: only REGISTER / LOGIN allowed without userId
         if (!action.equals("REGISTER") && !action.equals("LOGIN") && userId == null) {
             sendMessage("ERROR:NOT_LOGGED_IN");
             return;
@@ -686,9 +621,6 @@ class ClientHandler implements Runnable {
 
         switch (action) {
 
-            // -------------------------------------------------------------
-            // REGISTRATION: REGISTER:<userId>:<username>:<password>
-            // -------------------------------------------------------------
             case "REGISTER":
                 if (parts.length >= 4) {
                     String newUserId = parts[1];
@@ -708,9 +640,6 @@ class ClientHandler implements Runnable {
                 }
                 break;
 
-            // -------------------------------------------------------------
-            // LOGIN: LOGIN:<userId>:<password>
-            // -------------------------------------------------------------
             case "LOGIN":
                 if (parts.length >= 3) {
                     String loginId  = parts[1];
@@ -817,10 +746,10 @@ class ClientHandler implements Runnable {
 
                     StringBuilder payload = new StringBuilder();
 
-                    for (Message m : history) {
-                        String formattedTime = m.getFormattedTimestamp();
-                        String senderName    = server.resolveUsername(m.getSenderId());
-                        String content       = m.getContent();
+                    for (Message message : history) {
+                        String formattedTime = message.getFormattedTimestamp();
+                        String senderName    = server.resolveUsername(message.getSenderId());
+                        String content       = message.getContent();
 
                         if (payload.length() > 0) payload.append("|");
 
@@ -843,19 +772,18 @@ class ClientHandler implements Runnable {
                         server.searchDMs(userId, friendId, keyword);
 
                 StringBuilder payload = new StringBuilder();
-                for (Message m : matches) {
+                for (Message message : matches) {
                     if (payload.length() > 0) payload.append("|");
-                    payload.append(m.getFormattedTimestamp())
+                    payload.append(message.getFormattedTimestamp())
                             .append("~")
-                            .append(server.resolveUsername(m.getSenderId()))
+                            .append(server.resolveUsername(message.getSenderId()))
                             .append("~")
-                            .append(m.getContent());
+                            .append(message.getContent());
                 }
 
                 sendMessage("SEARCH_RESULTS:" + friendId + ":" + payload);
                 break;
             }
-
 
         }
     }

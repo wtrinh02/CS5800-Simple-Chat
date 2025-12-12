@@ -1,9 +1,5 @@
 package Message;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-
-
 public class Message {
 
     public enum MessageType {
@@ -20,12 +16,11 @@ public class Message {
 
     private final String id;
     private final String senderId;
-    private final String receiverId;   // or serverId
+    private final String receiverId;
     private final String content;
     private final MessageType type;
     private long timestamp;
 
-    // ---- MAIN CONSTRUCTOR (DATABASE + FULL CONTROL) ----
     public Message(String id, String senderId, String receiverId,
                    String content, MessageType type, long timestamp) {
         this.id = id;
@@ -36,7 +31,6 @@ public class Message {
         this.timestamp = timestamp;
     }
 
-    // ---- DEFAULT CONSTRUCTOR (auto timestamp) ----
     public Message(String id, String senderId, String receiverId,
                    String content, MessageType type) {
         this(id, senderId, receiverId, content, type, System.currentTimeMillis());
@@ -56,7 +50,6 @@ public class Message {
         return fmt.format(new java.util.Date(timestamp));
     }
 
-
     @Override
     public String toString() {
         return String.format(
@@ -68,7 +61,6 @@ public class Message {
                 type
         );
     }
-
 
     public String toDisplayString() {
         java.text.SimpleDateFormat fmt =

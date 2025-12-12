@@ -1,7 +1,7 @@
 package User;
-import java.util.*;
 import Message.*;
 import User.State.*;
+import java.util.*;
 
 public class User {
 
@@ -36,7 +36,6 @@ public class User {
             this.state = new OfflineState();
         }
     }
-
 
     public String getUserId() { return userId; }
     public String getUsername() { return username; }

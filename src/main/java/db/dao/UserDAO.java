@@ -2,7 +2,6 @@ package db.dao;
 
 import db.Database;
 import db.model.DbUser;
-
 import java.sql.*;
 
 public class UserDAO {
@@ -18,12 +17,10 @@ public class UserDAO {
         }
     }
 
-    // Legacy convenience overload – if something still calls the old version
     public void createUser(String id, String username, String email) {
-        // default dummy password
+
         createUser(id, username, email, "NO_PASSWORD_SET");
     }
-
 
     public void createUser(String id, String username, String email, String passwordHash) {
         String sql = "INSERT OR IGNORE INTO users (id, username, email, password_hash, online) VALUES (?, ?, ?, ?, 0)";
@@ -37,7 +34,6 @@ public class UserDAO {
             throw new RuntimeException(e);
         }
     }
-
 
     public DbUser getUserById(String userId) {
         String sql = "SELECT id, username, email FROM users WHERE id = ?";
@@ -69,7 +65,6 @@ public class UserDAO {
             throw new RuntimeException(e);
         }
     }
-
 
     public void setOnline(String userId, boolean online) {
         String sql = "UPDATE users SET online = ? WHERE id = ?";

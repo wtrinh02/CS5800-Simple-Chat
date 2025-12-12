@@ -7,9 +7,9 @@ public class ServerMessageDAO {
 
     public void saveMessage(String serverId, String senderId, String content, long timestamp) {
         String sql = """
-            INSERT INTO server_messages
-            (server_id, sender_id, content, timestamp)
-            VALUES (?, ?, ?, ?)
+        INSERT INTO server_messages
+        (server_id, sender_id, content, timestamp)
+        VALUES (?, ?, ?, ?)
         """;
 
         try (PreparedStatement ps = Database.getInstance().getConnection().prepareStatement(sql)) {
