@@ -1,0 +1,379 @@
+@startuml
+
+' =========================
+' CLIENT
+' =========================
+class ChatClient {
+  - SERVER_PORT : int {final}
+  - serverHost : String {final}
+  - socket : Socket
+  - in : BufferedReader
+  - out : PrintWriter
+  - userId : String
+  - username : String
+  - running : boolean
+  - currentServer : String
+  - listenerThread : Thread
+  - lastPrintedServer : String
+  - authenticated : boolean
+
+  + ChatClient(userId:String, username:String)
+  + ChatClient(userId:String, username:String, serverHost:String)
+  + connect() : void
+  + startCLI() : void
+  + disconnect() : void
+  + sendFriendRequest(friendId:String) : void
+  + acceptFriendRequest(friendId:String) : void
+  + sendDirectMessage(receiverId:String, content:String) : void
+  + getOnlineFriends() : void
+  + blockUser(targetUserId:String) : void
+  + unblockUser(targetUserId:String) : void
+  + getBlockedUsers() : void
+  + getDirectMessageHistory(friendId:String) : void
+  + createLocalServer(serverId:String, serverName:String) : void
+  + joinLocalServer(serverId:String) : void
+  + leaveLocalServer(serverId:String) : void
+  + sendServerMessage(serverId:String, content:String) : void
+  + listLocalServers() : void
+  + getServerMembers(serverId:String) : void
+  + main(args:String[]) : void
+}
+
+' =========================
+' SERVER
+' =========================
+class ChatServer {
+  - PORT : int {final}
+  - userDAO : UserDAO {final}
+  - friendDAO : FriendDAO {final}
+  - blockedDAO : BlockedDAO {final}
+  - dmDAO : DMDAO {final}
+  - serverDAO : ServerDAO {final}
+  - serverMessageDAO : ServerMessageDAO {final}
+  - users : Map
+  - onlineClients : Map
+  - localServers : Map
+  - threadPool : ExecutorService
+  - serverSocket : ServerSocket
+  - messageFactory : MessageFactory
+
+  + ChatServer()
+  + start() : void
+  + shutdown() : void
+  + registerUser(userId:String, username:String, email:String) : void
+  + registerUser(userId:String, username:String, email:String, rawPassword:String) : void
+  + connectUser(userId:String, handler:ClientHandler) : void
+  + disconnectUser(userId:String) : void
+  + sendFriendRequest(senderId:String, receiverId:String) : void
+  + acceptFriendRequest(userId:String, friendId:String) : void
+  + getOnlineFriends(userId:String) : List
+  + sendDirectMessage(senderId:String, receiverId:String, content:String) : void
+  + getConversationHistory(userId:String, friendId:String) : List
+  + blockUser(userId:String, blockedId:String) : void
+  + unblockUser(userId:String, blockedId:String) : void
+  + getBlockedUsers(userId:String) : List
+  + createLocalServer(serverId:String, serverName:String, ownerId:String) : void
+  + joinLocalServer(userId:String, serverId:String) : void
+  + leaveLocalServer(userId:String, serverId:String) : void
+  + sendServerMessage(userId:String, serverId:String, content:String) : void
+  + listLocalServers() : List
+  + getServerMembers(serverId:String) : List
+  + resolveUsername(userId:String) : String
+  + main(args:String[]) : void
+}
+
+class ClientHandler {
+  - socket : Socket {final}
+  - server : ChatServer {final}
+  - in : BufferedReader
+  - out : PrintWriter
+  - userId : String
+
+  + ClientHandler(socket:Socket, server:ChatServer)
+  + run() : void
+  + sendMessage(message:String) : void
+}
+
+' =========================
+' USER / STATE
+' =========================
+class User {
+  - userId : String {final}
+  - username : String {final}
+  - email : String {final}
+  - friendIds : Set
+  - directMessages : Map
+  - blockedUserIds : Set
+  - online : boolean
+  - state : UserState
+
+  + User(userId:String, username:String, email:String, friendIds:Set, directMessages:Map, online:boolean)
+  + getUserId() : String
+  + getUsername() : String
+  + getEmail() : String
+  + getFriendIds() : Set
+  + isOnline() : boolean
+  + setOnline(online:boolean) : void
+  + addFriend(friendId:String) : void
+  + removeFriend(friendId:String) : void
+  + isFriend(userId:String) : boolean
+  + addDirectMessage(conversationId:String, message:Message) : void
+  + getDirectMessages(conversationId:String) : List
+  + blockUser(targetUserId:String) : void
+  + unblockUser(targetUserId:String) : void
+  + hasBlocked(targetUserId:String) : boolean
+  + getBlockedUserIds() : Set
+  + setState(newState:UserState) : void
+  + getStateName() : String
+}
+
+class UserBuilder {
+  - userId : String
+  - username : String
+  - email : String
+  - friendIds : Set
+  - directMessages : Map
+  - online : boolean
+
+  + setUserId(userId:String) : UserBuilder
+  + setUsername(username:String) : UserBuilder
+  + setEmail(email:String) : UserBuilder
+  + setFriendIds(friendIds:Set) : UserBuilder
+  + setDirectMessages(directMessages:Map) : UserBuilder
+  + setOnline(online:boolean) : UserBuilder
+  + build() : User
+}
+
+interface UserState {
+  + getStateName() : String
+}
+
+class OnlineState {
+  + getStateName() : String
+}
+class AwayState {
+  + getStateName() : String
+}
+class BusyState {
+  + getStateName() : String
+}
+
+class OfflineState {
+  + getStateName() : String
+}
+
+' =========================
+' MESSAGE / FACTORY
+' =========================
+class Message {
+  - id : String
+  - senderId : String
+  - receiverId : String
+  - content : String
+  - type : MessageType
+  - timestamp : long
+
+  + Message(id:String, senderId:String, receiverId:String, content:String, type:MessageType)
+  + Message(id:String, senderId:String, receiverId:String, content:String, type:MessageType, timestamp:long)
+  + getId() : String
+  + getSenderId() : String
+  + getReceiverId() : String
+  + getContent() : String
+  + getType() : MessageType
+  + getTimestamp() : long
+  + getFormattedTimestamp() : String
+}
+
+enum MessageType {
+  DIRECT_MESSAGE
+  SERVER_MESSAGE
+  SYSTEM
+}
+
+class MessageFactory {
+  + directMessage(senderId:String, receiverId:String, content:String) : Message
+  + serverMessage(senderId:String, serverId:String, content:String) : Message
+  + friendRequest(senderId:String, receiverId:String) : Message
+  + userOnline(username:String) : Message
+  + userOffline(username:String) : Message
+  + serverJoin(username:String, serverId:String) : Message
+  + serverLeave(username:String, serverId:String) : Message
+}
+
+' =========================
+' DECORATOR
+' =========================
+interface MessageComponent {
+  + getContent() : String
+}
+
+class MessageDecorator{
+# wrapee:MessageComponent
++ MessageDecorator(in wrapee:MessageComponent)
++ getContent(): String
+}
+class BaseMessage {
+  - message : Message {final}
+
+  + BaseMessage(message:Message)
+  + getContent() : String
+}
+
+class SenderNameDecorator {
+  - component : MessageComponent {final}
+  - message : Message {final}
+
+  + SenderNameDecorator(component:MessageComponent, message:Message)
+  + getContent() : String
+}
+
+class TimestampDecorator {
+  - component : MessageComponent {final}
+  - message : Message {final}
+
+  + TimestampDecorator(component:MessageComponent, message:Message)
+  + getContent() : String
+}
+
+' =========================
+' SERVERS
+' =========================
+class LocalServer {
+  - serverId : String {final}
+  - serverName : String {final}
+  - ownerId : String {final}
+  - members : Set
+  - messages : List
+
+  + LocalServer(serverId:String, serverName:String, ownerId:String)
+  + addMember(userId:String) : void
+  + removeMember(userId:String) : void
+  + isMember(userId:String) : boolean
+  + getMembers() : Set
+  + addMessage(message:Message) : void
+  + getMessages() : List
+  + getServerName() : String
+  + getOwnerId() : String
+}
+
+' =========================
+' DAO LAYER
+' =========================
+class UserDAO {
+  + exists(userId:String) : boolean
+  + createUser(userId:String, username:String, email:String, passwordHash:String) : void
+  + getUserById(userId:String) : DbUser
+  + getPasswordHash(userId:String) : String
+  + setOnline(userId:String, online:boolean) : void
+}
+
+class FriendDAO {
+  + addFriendship(userId:String, friendId:String) : void
+  + areFriends(userId:String, friendId:String) : boolean
+  + getFriends(userId:String) : List
+}
+
+class BlockedDAO {
+  + blockUser(userId:String, blockedId:String) : void
+  + unblockUser(userId:String, blockedId:String) : void
+  + isBlocked(userId:String, blockedId:String) : boolean
+  + getBlockedUsers(userId:String) : List
+}
+
+class DMDAO {
+  + saveMessage(conversationId:String, senderId:String, receiverId:String, content:String, timestamp:long) : void
+  + getMessages(userId:String, friendId:String) : List
+}
+
+class ServerDAO {
+  + exists(serverId:String) : boolean
+  + createServer(serverId:String, serverName:String, ownerId:String) : void
+  + addMember(serverId:String, userId:String) : void
+  + removeMember(serverId:String, userId:String) : void
+  + listServers() : List
+  + getMembers(serverId:String) : List
+}
+
+class ServerMessageDAO {
+  + saveMessage(serverId:String, senderId:String, content:String, timestamp:long) : void
+}
+
+
+
+' =========================
+' DATABASE
+' =========================
+class Database{
+- instance: Database
+-connection : Connection
++getConnection(): Connection
++ getInstance(): Database
+}
+class SchemaManager {
+  + initialize() : void
+}
+
+class DbUser {
+  - id : String
+  - username : String
+  - email : String
+
+  + id() : String
+  + username() : String
+  + email() : String
+}
+UserDAO ..> DbUser
+FriendDAO ..> DbUser
+BlockedDAO ..> DbUser
+DMDAO ..> Message
+ServerDAO ..> DbUser
+ServerMessageDAO ..> Message
+
+SchemaManager ..> UserDAO
+SchemaManager ..> FriendDAO
+SchemaManager ..> BlockedDAO
+SchemaManager ..> DMDAO
+SchemaManager ..> ServerDAO
+SchemaManager ..> ServerMessageDAO
+SchemaManager *-- Database
+
+BaseMessage ..|> MessageComponent
+BaseMessage o.. Message
+MessageDecorator ..|> MessageComponent
+MessageDecorator o-- MessageComponent
+SenderNameDecorator o-- Message
+SenderNameDecorator o-- MessageComponent
+TimestampDecorator o-- Message
+TimestampDecorator o-- MessageComponent
+Message --> MessageType
+MessageFactory *-- Message
+
+AwayState ..|> UserState
+OnlineState ..|> UserState
+BusyState ..|> UserState
+OfflineState ..|> UserState
+User *-- UserState
+UserBuilder ..> User
+
+ChatClient ..> ChatServer
+ChatClient ..> Message
+
+ClientHandler ..> ChatServer
+ClientHandler ..> Message
+
+ChatServer o-- User
+ChatServer o-- UserDAO
+ChatServer o-- FriendDAO
+ChatServer o-- BlockedDAO
+ChatServer o-- DMDAO
+ChatServer o-- ServerDAO
+ChatServer o-- ServerMessageDAO
+
+ChatServer *-- ClientHandler
+ChatServer *-- LocalServer
+ChatServer *-- MessageFactory
+
+LocalServer *-- Message
+User o-- Message
+
+@enduml
