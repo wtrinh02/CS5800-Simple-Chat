@@ -86,6 +86,7 @@ public class ChatClient {
         System.out.println("unblock <userId>      - Unblock a user");
         System.out.println("blocked               - Show blocked users");
         System.out.println("history <userId>      - Show DM history");
+        System.out.println("search <userId> <keyword>   - Search DM history");
         System.out.println("\n========= SERVER COMMANDS =======");
         System.out.println("create <serverId> <name> - Create a server");
         System.out.println("servers                 - List all servers");
@@ -413,6 +414,25 @@ public class ChatClient {
                 }
                 break;
 
+            case "SEARCH_RESULTS": {
+                String[] p = parts[1].split(":", 2);
+                String friendId = p[0];
+
+                System.out.println("\n=== Search Results with " + friendId + " ===");
+
+                if (p.length < 2 || p[1].isEmpty()) {
+                    System.out.println("No matching messages.");
+                    break;
+                }
+
+                String[] entries = p[1].split("\\|");
+                for (String entry : entries) {
+                    String[] e = entry.split("~", 3);
+                    System.out.println("[" + e[0] + "] " + e[1] + ": " + e[2]);
+                }
+                break;
+            }
+
             case "HISTORY": {
                 String[] hParts = parts.length >= 2 ? parts[1].split(":", 2) : new String[0];
                 if (hParts.length >= 1) {
@@ -680,6 +700,14 @@ public class ChatClient {
                         getDirectMessageHistory(parts[1]);
                     } else {
                         System.out.println("Usage: history <userId>");
+                    }
+                    break;
+
+                case "search":
+                    if (parts.length >= 3) {
+                        sendCommand("SEARCH_DM:" + parts[1] + ":" + parts[2]);
+                    } else {
+                        System.out.println("Usage: search <userId> <keyword>");
                     }
                     break;
 

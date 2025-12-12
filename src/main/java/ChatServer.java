@@ -575,6 +575,12 @@ public class ChatServer {
         return u;
     }
 
+    // ChatServer.java
+    public List<Message> searchDMs(String userId, String friendId, String keyword) {
+        return dmDAO.searchMessages(userId, friendId, keyword);
+    }
+
+
     /**
      * Decorator pipeline:
      * - If sender == "SYSTEM": [time] msg
@@ -828,6 +834,29 @@ class ClientHandler implements Runnable {
                     sendMessage("HISTORY:" + friendId + ":" + payload);
                 }
                 break;
+
+            case "SEARCH_DM": {
+                String friendId = parts[1];
+                String keyword = parts[2];
+
+                List<Message> matches =
+                        server.searchDMs(userId, friendId, keyword);
+
+                StringBuilder payload = new StringBuilder();
+                for (Message m : matches) {
+                    if (payload.length() > 0) payload.append("|");
+                    payload.append(m.getFormattedTimestamp())
+                            .append("~")
+                            .append(server.resolveUsername(m.getSenderId()))
+                            .append("~")
+                            .append(m.getContent());
+                }
+
+                sendMessage("SEARCH_RESULTS:" + friendId + ":" + payload);
+                break;
+            }
+
+
         }
     }
 
