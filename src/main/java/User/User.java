@@ -29,8 +29,14 @@ public class User {
         this.directMessages = directMessages != null ? new HashMap<>(directMessages) : new HashMap<>();
         this.blockedUserIds = new HashSet<>();
         this.online = online;
-        this.state = new OfflineState();
+
+        if (online) {
+            this.state = new OnlineState();
+        } else {
+            this.state = new OfflineState();
+        }
     }
+
 
     public String getUserId() { return userId; }
     public String getUsername() { return username; }
@@ -41,7 +47,7 @@ public class User {
     }
 
     public boolean isOnline() {
-        return state instanceof OnlineState;
+        return online;
     }
 
     public void setOnline(boolean online) {
@@ -85,7 +91,7 @@ public class User {
         this.state = newState;
     }
 
-    public String getStatus() {
+    public String getStateName() {
         return state.getStateName();
     }
 

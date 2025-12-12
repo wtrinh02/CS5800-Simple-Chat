@@ -23,7 +23,7 @@ public class Message {
     private final String receiverId;   // or serverId
     private final String content;
     private final MessageType type;
-    private final long timestamp;
+    private long timestamp;
 
     // ---- MAIN CONSTRUCTOR (DATABASE + FULL CONTROL) ----
     public Message(String id, String senderId, String receiverId,
@@ -48,6 +48,7 @@ public class Message {
     public String getContent() { return content; }
     public MessageType getType() { return type; }
     public long getTimestamp() { return timestamp; }
+    public void setTimestamp(long timestamp) { this.timestamp =  timestamp; }
 
     public String getFormattedTimestamp() {
         java.text.SimpleDateFormat fmt =

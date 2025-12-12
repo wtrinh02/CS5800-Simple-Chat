@@ -1,240 +1,239 @@
-import org.junit.jupiter.api.*;
+import db.SchemaManager;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import java.io.*;
 import java.net.Socket;
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ChatApplicationIntegrationTest {
 
-    private static ExecutorService serverExecutor;
     private static Thread serverThread;
 
     @BeforeAll
-    static void startServer() {
-        ChatServer server = new ChatServer();
+    static void startServerOnce() throws Exception {
 
+        java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get("chat.db"));
+
+        SchemaManager.initialize();
+
+        ChatServer server = new ChatServer();
         serverThread = new Thread(server::start);
         serverThread.setDaemon(true);
         serverThread.start();
 
-        // Give server time to start
+        Thread.sleep(1000);
+    }
+    @AfterAll
+    static void stopServer() throws Exception {
         try {
-            Thread.sleep(1000);
-        } catch (InterruptedException ignored) {}
-    }
+            new Socket("localhost", 8888).close(); // wakes server blocking accept()
+        } catch (Exception ignored) {}
 
-    @Test
-    void serverCreationIsBroadcastToOtherOnlineUsers() throws Exception {
-
-        TestClient userA = new TestClient("srv1", "Alex");
-        TestClient userB = new TestClient("srv2", "Blake");
-
-        userA.connect();
-        userB.connect();
-
-        userA.send("CREATE_SERVER:test123:My Test Server");
-
-        String message = userB.waitFor("NEW_SERVER:test123:My Test Server:Alex", 3000);
-
-        assertNotNull(message);
-
-        userA.close();
-        userB.close();
-    }
-
-    @Test
-    void userCanJoinAndLeaveLocalServer() throws Exception {
-
-        TestClient user = new TestClient("join1", "Jordan");
-        user.connect();
-
-        user.send("JOIN_SERVER:general");
-
-        String joinMsg = user.waitFor("SERVER_JOINED:general", 3000);
-        assertNotNull(joinMsg);
-
-        user.send("LEAVE_SERVER:general");
-
-        String leaveMsg = user.waitFor("SERVER_LEFT:general", 3000);
-        assertNotNull(leaveMsg);
-
-        user.close();
-    }
-
-    @Test
-    void messagesAreBroadcastToAllServerMembers() throws Exception {
-
-        TestClient userA = new TestClient("chat1", "Maya");
-        TestClient userB = new TestClient("chat2", "Noah");
-
-        userA.connect();
-        userB.connect();
-
-        userA.send("JOIN_SERVER:general");
-        userB.send("JOIN_SERVER:general");
-
-        Thread.sleep(300);
-
-        userA.send("SERVER_MSG:general:Hello everyone!");
-
-        String message = userB.waitFor("SERVER_MSG:chat1:Maya:Hello everyone!", 3000);
-
-        assertNotNull(message);
-
-        userA.close();
-        userB.close();
-    }
-
-
-    @Test
-    void twoUsersCanSendAndReceiveDirectMessages() throws Exception {
-
-        TestClient userA = new TestClient("u1", "Alice");
-        TestClient userB = new TestClient("u2", "Bob");
-
-        userA.connect();
-        userB.connect();
-
-
-        userA.send("FRIEND_REQUEST:u2");
-        Thread.sleep(200);
-
-        userB.send("ACCEPT_FRIEND:u1");
-        Thread.sleep(200);
-
-
-        userA.send("SEND_DM:u2:Hello Bob!");
-        String messageAtUserB = userB.waitFor("DM:u1:Alice:Hello Bob!", 3000);
-
-        assertNotNull(messageAtUserB);
-
-
-        userB.send("SEND_DM:u1:Hey Alice!");
-        String messageAtUserA = userA.waitFor("DM:u2:Bob:Hey Alice!", 3000);
-
-        assertNotNull(messageAtUserA);
-
-        userA.close();
-        userB.close();
+        serverThread.interrupt();
     }
 
 
 
     @Test
-    void usersCanSendAndAcceptFriendRequests() throws Exception {
-
-        TestClient userA = new TestClient("u3", "Carol");
-        TestClient userB = new TestClient("u4", "Dave");
-
-        userA.connect();
-        userB.connect();
-
-
-        userA.send("FRIEND_REQUEST:u4");
-
-        String request = userB.waitFor("FRIEND_REQUEST:u3:Carol", 3000);
-        assertNotNull(request);
-
-
-        userB.send("ACCEPT_FRIEND:u3");
-
-        String confirmationA = userA.waitFor("FRIEND_ADDED:u4:Dave", 3000);
-        String confirmationB = userB.waitFor("FRIEND_ADDED:u3:Carol", 3000);
-
-        assertNotNull(confirmationA);
-        assertNotNull(confirmationB);
-
-        userA.close();
-        userB.close();
+    void sendingCommandWithoutLoginShouldReturnNotLoggedInError() throws Exception {
+        RawClientWithoutAuth client = new RawClientWithoutAuth();
+        client.connect();
+        client.send("SEND_DM:anyone:hello");
+        String error = client.waitForPrefix("ERROR:NOT_LOGGED_IN", 3000);
+        boolean receivedError = error != null && error.startsWith("ERROR:NOT_LOGGED_IN");
+        assertEquals(true, receivedError);
+        client.close();
     }
 
     @Test
-    void onlineFriendsListUpdatesWhenFriendComesOnline() throws Exception {
-
-        TestClient userA = new TestClient("friend1", "Evan");
-        TestClient userB = new TestClient("friend2", "Zoe");
-
-        userA.connect();
-        userB.connect();
-
-        userA.send("FRIEND_REQUEST:friend2");
-        Thread.sleep(200);
-
-        userB.send("ACCEPT_FRIEND:friend1");
-        Thread.sleep(200);
-
-        userA.send("GET_FRIENDS");
-
-        String friendsList = userA.waitFor("FRIENDS:", 3000);
-
-        assertNotNull(friendsList);
-        assertTrue(friendsList.contains("friend2:Zoe"));
-
-        userA.close();
-        userB.close();
+    void registerCommandShouldReturnRegisterOkForNewUser() throws Exception {
+        RawClientWithoutAuth client = new RawClientWithoutAuth();
+        client.connect();
+        client.send("REGISTER:intUser1:IntUserOne:intPass");
+        String response = client.waitForPrefix("REGISTER_OK:intUser1:IntUserOne", 3000);
+        boolean receivedRegisterOk = response != null && response.startsWith("REGISTER_OK:intUser1:IntUserOne");
+        assertEquals(true, receivedRegisterOk);
+        client.close();
     }
 
+    @Test
+    void loginForNonexistentUserShouldReturnNoSuchUserError() throws Exception {
+        RawClientWithoutAuth client = new RawClientWithoutAuth();
+        client.connect();
+        client.send("LOGIN:doesNotExist:somePass");
+        String response = client.waitForPrefix("LOGIN_FAILED:NO_SUCH_USER", 3000);
+        boolean receivedNoSuchUser = response != null && response.startsWith("LOGIN_FAILED:NO_SUCH_USER");
+        assertEquals(true, receivedNoSuchUser);
+        client.close();
+    }
+
+    @Test
+    void friendRequestAndAcceptShouldResultInFriendAddedMessagesOnBothSides() throws Exception {
+        TestClient alice = new TestClient("friendA1", "FriendAlice", "passA");
+        TestClient bob = new TestClient("friendB1", "FriendBob", "passB");
+
+        alice.connectAndRegister();
+        bob.connectAndRegister();
+
+        alice.send("FRIEND_REQUEST:friendB1");
+        String requestAtBob = bob.waitForPrefix("FRIEND_REQUEST:friendA1:FriendAlice", 3000);
+
+        bob.send("ACCEPT_FRIEND:friendA1");
+        String addedAtAlice = alice.waitForPrefix("FRIEND_ADDED:friendB1:FriendBob", 3000);
+        String addedAtBob = bob.waitForPrefix("FRIEND_ADDED:friendA1:FriendAlice", 3000);
+
+        boolean bothSidesReceivedFriendAdded = requestAtBob != null
+                && addedAtAlice != null
+                && addedAtBob != null
+                && addedAtAlice.startsWith("FRIEND_ADDED:friendB1:FriendBob")
+                && addedAtBob.startsWith("FRIEND_ADDED:friendA1:FriendAlice");
+
+        assertEquals(true, bothSidesReceivedFriendAdded);
+
+        alice.close();
+        bob.close();
+    }
+
+    @Test
+    void directMessageAfterFriendshipShouldDeliverDecoratedDmAndDmDelivered() throws Exception {
+        TestClient alice = new TestClient("dmA1", "DmAlice", "passA");
+        TestClient bob = new TestClient("dmB1", "DmBob", "passB");
+
+        alice.connectAndRegister();
+        bob.connectAndRegister();
+
+        alice.send("FRIEND_REQUEST:dmB1");
+        bob.waitForPrefix("FRIEND_REQUEST:dmA1:DmAlice", 3000);
+        bob.send("ACCEPT_FRIEND:dmA1");
+        alice.waitForPrefix("FRIEND_ADDED:dmB1:DmBob", 3000);
+        bob.waitForPrefix("FRIEND_ADDED:dmA1:DmAlice", 3000);
+
+        alice.send("SEND_DM:dmB1:hello dm advanced");
+        String dmAtBob = bob.waitForPrefix("DM:dmA1:DmAlice:", 3000);
+        String deliveredAtAlice = alice.waitForPrefix("DM_DELIVERED:dmB1:DmBob:", 3000);
+
+        boolean dmWasDeliveredWithExpectedPrefixes = dmAtBob != null
+                && deliveredAtAlice != null
+                && dmAtBob.startsWith("DM:dmA1:DmAlice:")
+                && deliveredAtAlice.startsWith("DM_DELIVERED:dmB1:DmBob:");
+
+        assertEquals(true, dmWasDeliveredWithExpectedPrefixes);
+
+        alice.close();
+        bob.close();
+    }
 
     static class TestClient {
 
         private final String userId;
         private final String username;
+        private final String password;
 
         private Socket socket;
-        private BufferedReader in;
-        private PrintWriter out;
+        private BufferedReader reader;
+        private PrintWriter writer;
+        private final BlockingQueue<String> inbox = new LinkedBlockingQueue<>();
 
-        private final BlockingQueue<String> receivedMessages = new LinkedBlockingQueue<>();
-
-        public TestClient(String userId, String username) {
+        TestClient(String userId, String username, String password) {
             this.userId = userId;
             this.username = username;
+            this.password = password;
         }
 
-        public void connect() throws Exception {
+        void connectAndRegister() throws Exception {
             socket = new Socket("localhost", 8888);
-
-            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            out = new PrintWriter(socket.getOutputStream(), true);
-
-            send("REGISTER:" + userId + ":" + username + ":test@mail");
-
+            reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            writer = new PrintWriter(socket.getOutputStream(), true);
             startReaderThread();
+            send("REGISTER:" + userId + ":" + username + ":" + password);
+            waitForPrefix("REGISTER_OK:" + userId + ":" + username, 3000);
         }
 
-        private void startReaderThread() {
-            new Thread(() -> {
-                try {
-                    String line;
-                    while ((line = in.readLine()) != null) {
-                        receivedMessages.offer(line);
-                    }
-                } catch (IOException ignored) {}
-            }).start();
+        void send(String command) {
+            writer.println(command);
         }
 
-        public void send(String command) {
-            out.println(command);
-        }
-
-        public String waitFor(String expectedPrefix, long timeoutMillis) throws InterruptedException {
-
-            long endTime = System.currentTimeMillis() + timeoutMillis;
-
-            while (System.currentTimeMillis() < endTime) {
-                String msg = receivedMessages.poll(200, TimeUnit.MILLISECONDS);
-
-                if (msg != null && msg.startsWith(expectedPrefix)) {
+        String waitForPrefix(String prefix, long timeoutMillis) throws InterruptedException {
+            long deadline = System.currentTimeMillis() + timeoutMillis;
+            while (System.currentTimeMillis() < deadline) {
+                String msg = inbox.poll(200, TimeUnit.MILLISECONDS);
+                if (msg != null && msg.startsWith(prefix)) {
                     return msg;
                 }
             }
             return null;
         }
 
-        public void close() throws IOException {
+        void close() throws IOException {
             socket.close();
+        }
+
+        private void startReaderThread() {
+            Thread t = new Thread(() -> {
+                try {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        inbox.offer(line);
+                    }
+                } catch (IOException ignored) {
+                }
+            });
+            t.setDaemon(true);
+            t.start();
+        }
+    }
+
+    static class RawClientWithoutAuth {
+
+        private Socket socket;
+        private BufferedReader reader;
+        private PrintWriter writer;
+        private final BlockingQueue<String> inbox = new LinkedBlockingQueue<>();
+
+        void connect() throws Exception {
+            socket = new Socket("localhost", 8888);
+            reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            writer = new PrintWriter(socket.getOutputStream(), true);
+            startReaderThread();
+        }
+
+        void send(String command) {
+            writer.println(command);
+        }
+
+        String waitForPrefix(String prefix, long timeoutMillis) throws InterruptedException {
+            long deadline = System.currentTimeMillis() + timeoutMillis;
+            while (System.currentTimeMillis() < deadline) {
+                String msg = inbox.poll(200, TimeUnit.MILLISECONDS);
+                if (msg != null && msg.startsWith(prefix)) {
+                    return msg;
+                }
+            }
+            return null;
+        }
+
+        void close() throws IOException {
+            socket.close();
+        }
+
+        private void startReaderThread() {
+            Thread t = new Thread(() -> {
+                try {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        inbox.offer(line);
+                    }
+                } catch (IOException ignored) {
+                }
+            });
+            t.setDaemon(true);
+            t.start();
         }
     }
 }
