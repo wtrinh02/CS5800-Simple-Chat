@@ -51,10 +51,49 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.0</version>
-                <configuration>
-                    <mainClass>ChatServer</mainClass>
-                </configuration>
+
+                <executions>
+
+                    <!-- Run Server -->
+                    <execution>
+                        <id>run-server</id>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>ChatServer</mainClass>
+                        </configuration>
+                    </execution>
+
+                    <!-- Run Client With Args -->
+                    <execution>
+                        <id>run-client</id>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>ChatClient</mainClass>
+
+                            <!-- Accepts runtime arguments -->
+                            <commandlineArgs>${exec.args}</commandlineArgs>
+
+                            <!-- Allow keyboard input (stdin) -->
+                            <systemProperties>
+                                <systemProperty>
+                                    <key>exec.input</key>
+                                    <value>true</value>
+                                </systemProperty>
+                            </systemProperties>
+
+                            <includeProjectDependencies>true</includeProjectDependencies>
+                            <cleanupDaemonThreads>false</cleanupDaemonThreads>
+                        </configuration>
+                    </execution>
+
+                </executions>
             </plugin>
+
+
         </plugins>
     </build>
 
